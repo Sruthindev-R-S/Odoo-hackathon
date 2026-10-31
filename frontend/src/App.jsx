@@ -20,6 +20,8 @@ import RequireAdmin from './auth/RequireAdmin';
 import RequireRole, { getHomePathForRole } from './auth/RequireRole';
 import AdminWorkspace from './features/dashboard/AdminWorkspace';
 import CustomerBillingPage from './features/billing/CustomerBillingPage';
+import BillingRunsPage from './features/billing/BillingRunsPage';
+import InvoicesPage from './features/invoices/InvoicesPage';
 import StaffWorkspace from './features/staff/StaffWorkspace';
 import CustomerPortal from './features/portal/CustomerPortal';
 
@@ -297,6 +299,8 @@ export default function App() {
             <Route path="/portal/billing" element={<CustomerBillingPage />} />
             <Route path="/portal/subscriptions/new" element={<CustomerBillingPage />} />
             <Route path="/checkout" element={<CustomerBillingPage />} />
+            <Route path="/billing-runs" element={<BillingRunsPage />} />
+            <Route path="/invoices" element={<InvoicesPage />} />
 
             {/* Staff Operations Dashboard */}
             <Route

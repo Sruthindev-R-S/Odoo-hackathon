@@ -101,3 +101,26 @@ export function getPlanAvailability(fromDate, toDate) {
   return 'active';
 }
 
+/**
+ * Calculate due date status relative to today.
+ * @param {string} dueDateString 
+ * @returns {{ label: string, isOverdue: boolean, days: number }}
+ */
+export function getDueStatus(dueDateString) {
+  if (!dueDateString) return { label: 'No due date', isOverdue: false, days: 0 };
+  const due = new Date(dueDateString);
+  const now = new Date();
+  const d1 = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const d2 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.round((d1 - d2) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) {
+    const days = Math.abs(diffDays);
+    return { label: `${days} day${days > 1 ? 's' : ''} overdue`, isOverdue: true, days };
+  } else if (diffDays === 0) {
+    return { label: 'Due today', isOverdue: false, days: 0 };
+  } else {
+    return { label: `Due in ${diffDays} day${diffDays > 1 ? 's' : ''}`, isOverdue: false, days: diffDays };
+  }
+}
+
+

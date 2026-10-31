@@ -5,6 +5,8 @@
  * and automated invoice generation upon successful billing.
  */
 
+import { operationsService } from './operationsService';
+
 const STORAGE_SUBSCRIPTIONS_KEY = 'brightloop_subscriptions_v1';
 const STORAGE_INVOICES_KEY = 'brightloop_invoices_v1';
 
@@ -212,5 +214,32 @@ export const billingService = {
       return invs.filter((i) => i.customerId === customerId);
     }
     return invs;
+  },
+
+  /**
+   * Billing run operations delegated to unified operationsService
+   */
+  async getBillingRuns() {
+    return operationsService.getBillingRuns();
+  },
+
+  async runBilling(actorUser) {
+    return operationsService.runBilling(actorUser);
+  },
+
+  async confirmInvoice(invoiceId, actorUser) {
+    return operationsService.confirmInvoice(invoiceId, actorUser);
+  },
+
+  async sendInvoice(invoiceId, actorUser) {
+    return operationsService.sendInvoice(invoiceId, actorUser);
+  },
+
+  async recordInvoicePayment(invoiceId, paymentData, actorUser) {
+    return operationsService.recordPayment(invoiceId, paymentData, actorUser);
+  },
+
+  async cancelInvoice(invoiceId, actorUser) {
+    return operationsService.cancelInvoice(invoiceId, actorUser);
   },
 };
