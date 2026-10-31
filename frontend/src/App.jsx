@@ -41,6 +41,14 @@ function DashboardRouter() {
   return <Navigate to={getHomePathForRole(user.role)} replace />;
 }
 
+function PaymentsRouter() {
+  const { user } = useAuth();
+  if (user?.role === 'admin') {
+    return <AdminWorkspace initialTab="payments" />;
+  }
+  return <StaffWorkspace initialTab="payments" />;
+}
+
 function AccountOverview() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -334,6 +342,14 @@ export default function App() {
               element={
                 <RequireRole allowedRoles={['staff', 'admin']}>
                   <InvoicesPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/payments"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
+                  <PaymentsRouter />
                 </RequireRole>
               }
             />

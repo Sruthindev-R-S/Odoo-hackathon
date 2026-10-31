@@ -13,6 +13,7 @@ import {
   FileText,
   Users,
   BookOpen,
+  CreditCard,
   LogOut,
   Menu,
   X,
@@ -76,6 +77,12 @@ const ADMIN_NAV_ITEMS = [
     group: 'Operations',
   },
   {
+    id: 'payments',
+    label: 'Payments & Collections',
+    icon: CreditCard,
+    group: 'Operations',
+  },
+  {
     id: 'staff',
     label: 'Staff Members',
     icon: Users,
@@ -100,6 +107,12 @@ const STAFF_NAV_ITEMS = [
     id: 'invoices',
     label: 'Billing Day & Invoices',
     icon: FileText,
+    group: 'Daily Operations',
+  },
+  {
+    id: 'payments',
+    label: 'Payments & Collections',
+    icon: CreditCard,
     group: 'Daily Operations',
   },
   {
