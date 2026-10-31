@@ -287,11 +287,12 @@ export const planService = {
   /**
    * 18. POST /api/plans (X-Company-User-Id: admin)
    */
-  async createPlan(planData) {
+  async createPlan(planData, actorUser = null) {
     try {
       const res = await apiClient.post(
         '/api/plans',
-        buildPlanApiPayload(planData, false)
+        buildPlanApiPayload(planData, false),
+        { actorUser }
       );
       const rawPlan = res?.plan || res;
       if (rawPlan?.id && planData.productId) {
@@ -342,11 +343,12 @@ export const planService = {
   /**
    * 21. PATCH /api/plans/{planId} (X-Company-User-Id: admin)
    */
-  async updatePlan(id, planData) {
+  async updatePlan(id, planData, actorUser = null) {
     try {
       const res = await apiClient.patch(
         `/api/plans/${id}`,
-        buildPlanApiPayload(planData, true)
+        buildPlanApiPayload(planData, true),
+        { actorUser }
       );
       const rawPlan = res?.plan || res;
       if (planData.productId !== undefined) {
@@ -442,12 +444,14 @@ export const planService = {
   /**
    * 23. PATCH /api/plans/{planId}/status (X-Company-User-Id: admin, { active })
    */
-  async updatePlanStatus(id, active) {
+  async updatePlanStatus(id, active, actorUser = null) {
     const nextActive = Boolean(active);
     try {
-      const res = await apiClient.patch(`/api/plans/${id}/status`, {
-        active: nextActive,
-      });
+      const res = await apiClient.patch(
+        `/api/plans/${id}/status`,
+        { active: nextActive },
+        { actorUser }
+      );
       const normalized = normalizePlanFromApi(res?.plan || res);
       setStoredPlans(
         getStoredPlans().map((p) => (p.id === id ? normalized : p))
@@ -474,9 +478,9 @@ export const planService = {
   /**
    * 22. DELETE /api/plans/{planId} (Archives subscription plan on backend)
    */
-  async deletePlan(id) {
+  async deletePlan(id, actorUser = null) {
     try {
-      const res = await apiClient.delete(`/api/plans/${id}`);
+      const res = await apiClient.delete(`/api/plans/${id}`, { actorUser });
       const rawPlan = res?.plan;
       if (rawPlan) {
         const normalized = normalizePlanFromApi(rawPlan);

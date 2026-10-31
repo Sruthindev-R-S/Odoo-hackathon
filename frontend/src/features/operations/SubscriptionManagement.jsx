@@ -18,7 +18,6 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { authService } from '../../services/authService';
-import { resolveCompanyUserId } from '../../api/client';
 import QuotationManagement from './QuotationManagement';
 import CustomerPicker from './CustomerPicker';
 import { productService } from '../../api/services/productService';
@@ -105,8 +104,6 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
     unitPrice: 0,
     taxRate: 18,
   });
-
-  const isLiveCompanyUser = Boolean(resolveCompanyUserId(user));
 
   const today = new Date().toISOString().slice(0, 10);
   const [formData, setFormData] = useState({
@@ -1985,6 +1982,9 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
                       <th className="py-2.5 px-3 text-right">Unit Price</th>
                       <th className="py-2.5 px-3 text-right">Taxes</th>
                       <th className="py-2.5 px-4 text-right">Amount</th>
+                      {selectedSub.status === 'draft' && (
+                        <th className="py-2.5 px-2 w-8" />
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-200">
@@ -2015,6 +2015,18 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
                         <td className="py-3 px-4 text-right font-semibold tabular-nums text-zinc-900">
                           {formatMoney(line.amount)}
                         </td>
+                        {selectedSub.status === 'draft' && (
+                          <td className="py-3 px-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveDraftItem(line.id)}
+                              className="p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                              title="Remove item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
