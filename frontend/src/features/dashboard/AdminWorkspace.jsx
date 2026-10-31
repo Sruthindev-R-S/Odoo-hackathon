@@ -11,6 +11,7 @@ import SubscriptionManagement from '../operations/SubscriptionManagement';
 import InvoiceManagement from '../operations/InvoiceManagement';
 import PaymentsPage from '../payments/PaymentsPage';
 import StaffManagement from '../staff/StaffManagement';
+import FinanceOverviewPage from '../../pages/FinanceOverviewPage';
 
 export default function AdminWorkspace({ initialTab = 'dashboard' }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -47,6 +48,9 @@ export default function AdminWorkspace({ initialTab = 'dashboard' }) {
         />
       )}
       {currentTab === 'payments' && <PaymentsPage />}
+      {currentTab === 'finance' && (
+        <FinanceOverviewPage onNavigate={handleTabChange} />
+      )}
       {currentTab === 'staff' && <StaffManagement />}
     </AppLayout>
   );

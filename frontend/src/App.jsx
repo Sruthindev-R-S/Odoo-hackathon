@@ -24,6 +24,7 @@ import BillingRunsPage from './features/billing/BillingRunsPage';
 import InvoicesPage from './features/invoices/InvoicesPage';
 import StaffWorkspace from './features/staff/StaffWorkspace';
 import CustomerPortal from './features/portal/CustomerPortal';
+import FinanceOverviewPage from './pages/FinanceOverviewPage';
 
 function RootWorkspaceRouter() {
   const { user } = useAuth();
@@ -79,6 +80,12 @@ function AccountOverview() {
               className="text-xs font-medium text-zinc-700 hover:text-zinc-900 no-underline"
             >
               {homeLabel}
+            </Link>
+            <Link
+              to="/finance"
+              className="text-xs font-semibold text-zinc-900 hover:text-zinc-700 no-underline"
+            >
+              Finance Lead (Month-End)
             </Link>
             <Link
               to="/payments"
@@ -394,6 +401,24 @@ export default function App() {
                   <PaymentsRouter />
                 </RequireRole>
               }
+            />
+
+            {/* Finance Lead Month-End Overview Route */}
+            <Route
+              path="/finance"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
+                  <FinanceOverviewPage standalone />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/finance-overview"
+              element={<Navigate to="/finance" replace />}
+            />
+            <Route
+              path="/reports/finance"
+              element={<Navigate to="/finance" replace />}
             />
 
             {/* Staff Operations Workspace */}
