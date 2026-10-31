@@ -11,7 +11,8 @@ require("./config/db_connect");
 
 const { createPasswordResetTokensTable } = require("./models/reset");
 
-app.use("/", require("./routes/routes"));
+app.use("/user", require("./routes/user_routes"));
+app.use("/company-users", require("./routes/company_users"));
 
 createPasswordResetTokensTable()
   .then(() => {
