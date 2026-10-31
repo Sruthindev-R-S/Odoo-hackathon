@@ -13,7 +13,11 @@
  * Falls back cleanly to local storage only when the backend host is unreachable offline.
  */
 
-import { apiClient, isNetworkOfflineError } from '../api/client.js';
+import {
+  apiClient,
+  isNetworkOfflineError,
+  storeAuthToken,
+} from '../api/client.js';
 
 const STORAGE_USERS_KEY = 'brightloop_users_v1';
 const STORAGE_CURRENT_USER_KEY = 'brightloop_current_user_v1';
@@ -243,10 +247,11 @@ export const authService = {
               STORAGE_CURRENT_USER_KEY,
               JSON.stringify(safeUser)
             );
+            storeAuthToken(res.token);
             return {
               success: true,
               user: safeUser,
-              token: `bl_company_${safeUser.id}`,
+              token: res.token,
             };
           }
         } catch (companyErr) {
@@ -280,10 +285,11 @@ export const authService = {
               STORAGE_CURRENT_USER_KEY,
               JSON.stringify(safeUser)
             );
+            storeAuthToken(res.token);
             return {
               success: true,
               user: safeUser,
-              token: `bl_user_${safeUser.id}`,
+              token: res.token,
             };
           }
         } catch (custErr) {
@@ -336,7 +342,7 @@ export const authService = {
       return {
         success: true,
         user: safeUser,
-        token: `bl_tok_${Date.now()}_${safeUser.id}`,
+          token: null,
       };
     }
   },
@@ -420,10 +426,11 @@ export const authService = {
           STORAGE_CURRENT_USER_KEY,
           JSON.stringify(safeUser)
         );
+        storeAuthToken(res.token);
         return {
           success: true,
           user: safeUser,
-          token: `bl_company_${safeUser.id}`,
+          token: res.token,
         };
       }
 
@@ -441,10 +448,11 @@ export const authService = {
       });
       rememberKnownCustomer(safeUser);
       localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(safeUser));
+      storeAuthToken(res.token);
       return {
         success: true,
         user: safeUser,
-        token: `bl_user_${safeUser.id}`,
+        token: res.token,
       };
     } catch (err) {
       if (!isNetworkOfflineError(err)) {
@@ -493,11 +501,12 @@ export const authService = {
         rememberKnownCustomer(safeUser);
       }
       localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(safeUser));
+      storeAuthToken(null);
 
       return {
         success: true,
         user: safeUser,
-        token: `bl_tok_${Date.now()}_${safeUser.id}`,
+        token: null,
       };
     }
   },
@@ -673,6 +682,7 @@ export const authService = {
 
   signOut() {
     localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+    storeAuthToken(null);
     return { success: true };
   },
 

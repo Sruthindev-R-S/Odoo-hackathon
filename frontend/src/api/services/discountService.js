@@ -10,6 +10,8 @@
  * - Scope targeting either specific products (one or multiple) or whole subscriptions
  */
 
+import { apiClient, isNetworkOfflineError } from '../client.js';
+
 const STORAGE_KEY = 'brightloop_discount_rules_v1';
 
 const SEED_DISCOUNT_RULES = [
@@ -97,6 +99,58 @@ function saveStoredDiscountRules(rules) {
   } catch (err) {
     console.error('Failed to persist discount rules', err);
   }
+}
+
+function normalizeDiscountFromApi(raw) {
+  const productIds = Array.isArray(raw.product_ids)
+    ? raw.product_ids.filter(Boolean)
+    : raw.product_id
+    ? [raw.product_id]
+    : [];
+  const appliesTo =
+    raw.application_scope === 'products' || productIds.length > 0
+      ? 'product'
+      : 'subscription';
+  return normalizeRuleRecord({
+    ...raw,
+    id: raw.id,
+    name: raw.name || '',
+    type: raw.discount_type || raw.type || 'percentage',
+    value: Number(raw.discount_value ?? raw.value ?? 0),
+    appliesTo,
+    productIds,
+    productId: productIds[0] || '',
+    minQuantity: Number(raw.minimum_quantity ?? raw.min_quantity ?? raw.minQuantity ?? 0),
+    minPurchase: Number(raw.minimum_purchase ?? raw.min_purchase ?? raw.minPurchase ?? 0),
+    startDate: raw.start_date || raw.startDate || '',
+    endDate: raw.end_date || raw.endDate || '',
+    usageLimit: raw.usage_limit ?? raw.usageLimit ?? null,
+    usedCount: Number(raw.usage_count ?? raw.used_count ?? raw.usedCount ?? 0),
+    isActive: raw.active !== false && raw.is_active !== false,
+    createdAt: raw.created_at || raw.createdAt,
+    updatedAt: raw.updated_at || raw.updatedAt,
+  });
+}
+
+function buildDiscountApiPayload(payload, partial = false) {
+  const result = {};
+  const fields = {
+    name: payload.name,
+    discountType: payload.type,
+    discountValue: payload.value,
+    minimumPurchase: payload.minPurchase,
+    minimumQuantity: payload.minQuantity,
+    startDate: payload.startDate,
+    endDate: payload.endDate,
+    usageLimit: payload.usageLimit,
+    isActive: payload.isActive,
+    applicationScope: payload.appliesTo === 'product' ? 'products' : 'subscription',
+    productIds: payload.productIds || (payload.productId ? [payload.productId] : []),
+  };
+  Object.entries(fields).forEach(([key, value]) => {
+    if (!partial || value !== undefined) result[key] = value;
+  });
+  return result;
 }
 
 function requireAdminActor(actorUser) {
@@ -416,12 +470,21 @@ export const discountService = {
   },
 
   async getDiscountRules() {
-    await new Promise((r) => setTimeout(r, 50));
-    return getStoredDiscountRules();
+    try {
+      const response = await apiClient.get('/api/discounts');
+      const rows = Array.isArray(response) ? response : response?.discounts || [];
+      const rules = rows.map(normalizeDiscountFromApi);
+      saveStoredDiscountRules(rules);
+      return rules;
+    } catch (error) {
+      if (!isNetworkOfflineError(error) && error.status !== 401 && error.status !== 403) {
+        throw error;
+      }
+      return getStoredDiscountRules();
+    }
   },
 
   async createDiscountRule(payload, actorUser) {
-    await new Promise((r) => setTimeout(r, 80));
     requireAdminActor(actorUser);
 
     const name = (payload.name || '').trim();
@@ -470,6 +533,28 @@ export const discountService = {
         ? Math.floor(Number(payload.usageLimit))
         : null;
 
+    try {
+      const response = await apiClient.post(
+        '/api/discounts',
+        buildDiscountApiPayload({
+          ...payload,
+          type,
+          value,
+          appliesTo,
+          productIds,
+          minQuantity,
+          minPurchase,
+          usageLimit,
+        }),
+        { actorUser }
+      );
+      const created = normalizeDiscountFromApi(response?.discount || response);
+      saveStoredDiscountRules([created, ...getStoredDiscountRules()]);
+      return created;
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
+    }
+
     const rules = getStoredDiscountRules();
     const now = new Date().toISOString();
     const created = normalizeRuleRecord({
@@ -501,7 +586,6 @@ export const discountService = {
   },
 
   async updateDiscountRule(id, payload, actorUser) {
-    await new Promise((r) => setTimeout(r, 80));
     requireAdminActor(actorUser);
 
     const rules = getStoredDiscountRules();
@@ -560,6 +644,34 @@ export const discountService = {
           : null
         : rules[idx].usageLimit;
 
+    try {
+      const response = await apiClient.patch(
+        `/api/discounts/${id}`,
+        buildDiscountApiPayload(
+          {
+            ...payload,
+            type,
+            value,
+            appliesTo,
+            productIds,
+            minQuantity: payload.minQuantity ?? rules[idx].minQuantity,
+            minPurchase: payload.minPurchase ?? rules[idx].minPurchase,
+            startDate,
+            endDate,
+            usageLimit,
+          },
+          true
+        ),
+        { actorUser }
+      );
+      const updated = normalizeDiscountFromApi(response?.discount || response);
+      rules[idx] = updated;
+      saveStoredDiscountRules(rules);
+      return updated;
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
+    }
+
     const updated = normalizeRuleRecord({
       ...rules[idx],
       name,
@@ -596,13 +708,26 @@ export const discountService = {
   },
 
   async toggleDiscountRule(id, actorUser) {
-    await new Promise((r) => setTimeout(r, 60));
     requireAdminActor(actorUser);
 
     const rules = getStoredDiscountRules();
     const idx = rules.findIndex((r) => r.id === id);
     if (idx === -1) {
       throw new Error('Discount rule not found.');
+    }
+
+    try {
+      const response = await apiClient.patch(
+        `/api/discounts/${id}/status`,
+        { isActive: !rules[idx].isActive },
+        { actorUser }
+      );
+      const updated = normalizeDiscountFromApi(response?.discount || response);
+      rules[idx] = updated;
+      saveStoredDiscountRules(rules);
+      return updated;
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
     }
 
     rules[idx] = {
@@ -615,10 +740,16 @@ export const discountService = {
   },
 
   async deleteDiscountRule(id, actorUser) {
-    await new Promise((r) => setTimeout(r, 60));
     requireAdminActor(actorUser);
 
     const rules = getStoredDiscountRules();
+    try {
+      await apiClient.delete(`/api/discounts/${id}`, { actorUser });
+      saveStoredDiscountRules(rules.filter((r) => r.id !== id));
+      return { success: true };
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
+    }
     saveStoredDiscountRules(rules.filter((r) => r.id !== id));
     return { success: true };
   },

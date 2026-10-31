@@ -4,6 +4,7 @@ const {
 	getCompanyUserByCredentials,
 } = require("../models/company_users");
 const { forgotPassword } = require("../controllers/auth");
+const { signAuthToken } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -30,6 +31,8 @@ router.post("/register", async (req, res) => {
 		return res.status(201).json({
 			message: "Registration successful",
 			user,
+			token: signAuthToken({ type: "customer", userId: user.id, role: "CUSTOMER" }),
+			token: signToken({ sub: String(user.id), type: "user" }),
 		});
 	} catch (error) {
 		console.error("Failed to register user:", error);
@@ -60,6 +63,7 @@ router.post("/login", async (req, res) => {
 		return res.json({
 			message: "Login successful",
 			user,
+			token: signAuthToken({ type: "customer", userId: user.id, role: "CUSTOMER" }),
 		});
 	} catch (error) {
 		console.error("Failed to log in user:", error);

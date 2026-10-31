@@ -127,7 +127,7 @@ export function SignUpPage() {
   return (
     <AuthLayout
       title="Create your Brightloop account"
-      subtitle="Register as a Customer or System Administrator. Staff accounts are provisioned exclusively by Administrators."
+      subtitle="Register a customer account. Staff and administrator accounts are provisioned securely by the backend."
     >
       {generalError && (
         <div className="bl-alert bl-alert-danger" role="alert">
@@ -137,59 +137,15 @@ export function SignUpPage() {
 
       <form onSubmit={handleSubmit} noValidate>
         <div style={{ marginBottom: 14 }}>
-          <label
-            style={{
-              display: 'block',
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--bl-text-primary)',
-              marginBottom: 6,
-            }}
-          >
-            Account Type
-          </label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {[
-              { value: 'customer', label: 'Customer Portal' },
-              { value: 'admin', label: 'Administrator' },
-            ].map((opt) => {
-              const selected = formData.role === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() =>
-                    setFormData((prev) => ({ ...prev, role: opt.value }))
-                  }
-                  style={{
-                    padding: '9px 12px',
-                    borderRadius: 8,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    border: selected
-                      ? '1px solid #18181b'
-                      : '1px solid #e4e4e7',
-                    backgroundColor: selected ? '#18181b' : '#ffffff',
-                    color: selected ? '#ffffff' : '#3f3f46',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
           <p
             style={{
               fontSize: 11.5,
               color: 'var(--bl-text-muted)',
-              marginTop: 6,
+              marginTop: 0,
               marginBottom: 0,
             }}
           >
-            Internal staff members cannot self-register — only an Administrator can add staff.
+            Internal staff and administrator accounts can only be provisioned by authorized backend workflows.
           </p>
         </div>
 

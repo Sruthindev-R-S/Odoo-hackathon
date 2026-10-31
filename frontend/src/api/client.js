@@ -1,12 +1,12 @@
 /**
  * Central HTTP API Client for Brightloop Backend
  *
- * Base URL defaults to http://192.168.0.155:3000 (overridable via VITE_API_BASE_URL).
- * Automatically attaches X-Company-User-Id when an authenticated Admin or Staff
- * company user session is active.
+ * Base URL defaults to the Vite dev proxy (overridable via VITE_API_BASE_URL).
+ * Automatically attaches the stored JWT as a Bearer token.
  */
 
 const CURRENT_USER_STORAGE_KEY = 'brightloop_current_user_v1';
+const AUTH_TOKEN_STORAGE_KEY = 'brightloop_auth_token_v1';
 
 const viteEnvBaseUrl =
   typeof import.meta !== 'undefined' &&
@@ -16,7 +16,7 @@ const viteEnvBaseUrl =
     : '';
 
 export const API_BASE_URL = (
-  viteEnvBaseUrl || 'http://192.168.0.155:3000'
+  viteEnvBaseUrl || ''
 ).replace(/\/+$/, '');
 
 const UUID_REGEX =
@@ -49,9 +49,26 @@ export function getStoredCurrentUser() {
   }
 }
 
+export function getStoredAuthToken() {
+  try {
+    return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function storeAuthToken(token) {
+  try {
+    if (token) localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures; requests will return an authorization error.
+  }
+}
+
 /**
- * Resolve X-Company-User-Id header value for authenticated company users (Admin / Staff).
- * Never sends a company user header when signed in as a Customer.
+ * Resolve the authenticated company-user ID for local UI decisions.
+ * Authentication itself uses the JWT attached by apiRequest.
  */
 export function resolveCompanyUserId(explicitActor = null) {
   const actor = explicitActor || getStoredCurrentUser();
@@ -72,7 +89,9 @@ export function resolveCompanyUserId(explicitActor = null) {
 
 function buildUrl(path, query) {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const url = new URL(`${API_BASE_URL}${cleanPath}`);
+  const url = API_BASE_URL
+    ? new URL(`${API_BASE_URL}${cleanPath}`)
+    : new URL(cleanPath, globalThis.location?.origin || 'http://localhost:5173');
 
   if (query && typeof query === 'object') {
     Object.entries(query).forEach(([key, val]) => {
@@ -109,9 +128,15 @@ export async function apiRequest(
     reqHeaders['Content-Type'] = 'application/json';
   }
 
-  if (includeCompanyHeader && !reqHeaders['X-Company-User-Id']) {
+  const authToken = getStoredAuthToken();
+  if (authToken && !reqHeaders.Authorization) {
+    reqHeaders.Authorization = `Bearer ${authToken}`;
+  }
+
+  if (includeCompanyHeader && !reqHeaders['x-company-user-id'] && !reqHeaders['X-Company-User-Id']) {
     const companyUserId = resolveCompanyUserId(actorUser);
     if (companyUserId) {
+      reqHeaders['x-company-user-id'] = companyUserId;
       reqHeaders['X-Company-User-Id'] = companyUserId;
     }
   }
@@ -174,4 +199,3 @@ export const apiClient = {
   delete: (path, options = {}) =>
     apiRequest(path, { ...options, method: 'DELETE' }),
 };
-

@@ -7,6 +7,8 @@ const {
 	getQuotation,
 	getSubscription,
 } = require("../models/commercial");
+const { generateInvoiceForSubscription, getInvoice } = require("../services/billing");
+const { transitionInvoice, recordPayment } = require("../services/invoice");
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuid = (value) => uuid.test(String(value || ""));
@@ -296,14 +298,88 @@ async function createSubscription(req, res) {
 	if (!customerId || !isUuid(planId) || !Number.isInteger(Number(quantity)) || Number(quantity) < 1) {
 		return res.status(400).json({ error: "customerId, planId and positive integer quantity are required" });
 	}
+
+	async function customerCheckout(req, res) {
+		const customerId = req.auth?.userId;
+		if (!customerId) return res.status(401).json({ error: "Customer authentication is required" });
+
+		const captured = { statusCode: 200, payload: null };
+		const internalRes = {
+			status(code) {
+				captured.statusCode = code;
+				return this;
+			},
+			json(payload) {
+				captured.payload = payload;
+				return this;
+			},
+		};
+
+		await createSubscription(
+			{ ...req, body: { ...req.body, customerId }, companyUser: null },
+			internalRes
+		);
+		if (captured.statusCode >= 400) {
+			return res.status(captured.statusCode).json(captured.payload);
+		}
+
+		const subscriptionId = captured.payload?.subscription?.id;
+		if (!subscriptionId) return res.status(500).json({ error: "Checkout subscription was not created" });
+
+		try {
+			for (const target of ["quotation", "confirmed", "active"]) {
+				await pool.query(
+					"UPDATE subscriptions SET status=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2",
+					[target, subscriptionId]
+				);
+				await pool.query(
+					"INSERT INTO subscription_status_history(subscription_id,status,changed_by) VALUES($1,$2,NULL)",
+					[subscriptionId, target]
+				);
+			}
+
+			const invoiceId = await generateInvoiceForSubscription(subscriptionId, {
+				allowFuture: true,
+				today: req.body.startDate || new Date().toISOString().slice(0, 10),
+			});
+			await transitionInvoice(invoiceId, "confirmed");
+			const invoice = await getInvoice(invoiceId);
+			await recordPayment(invoiceId, {
+				paymentMethod: req.body.paymentMethod || "online",
+				amount: invoice.total_amount,
+				paymentDate: new Date().toISOString().slice(0, 10),
+				transactionReference: req.body.transactionReference,
+				notes: req.body.notes || "Customer checkout",
+			});
+
+			return res.status(201).json({
+				subscription: await getSubscription(subscriptionId),
+				invoice: await getInvoice(invoiceId),
+			});
+		} catch (error) {
+			return failure(res, error, "Failed to complete customer checkout");
+		}
+	}
 	const client = await pool.connect();
 	try {
 		await client.query("BEGIN");
 		if (!(await client.query("SELECT id FROM users WHERE id=$1", [customerId])).rows[0]) {
 			throw Object.assign(new Error("Customer not found"), { status: 400 });
 		}
-		if (!(await client.query("SELECT id FROM subscription_plans WHERE id=$1 AND active=TRUE", [planId])).rows[0]) {
-			throw Object.assign(new Error("Active subscription plan not found"), { status: 400 });
+		const requestedStart = startDate || new Date().toISOString().slice(0, 10);
+		const plan = (await client.query(
+			`SELECT id, price, billing_frequency, minimum_quantity, available_from, available_until
+			 FROM subscription_plans
+			 WHERE id=$1 AND active=TRUE
+			 AND (available_from IS NULL OR available_from <= $2::date)
+			 AND (available_until IS NULL OR available_until >= $2::date)`,
+			[planId, requestedStart]
+		)).rows[0];
+		if (!plan) {
+			throw Object.assign(new Error("Active and available subscription plan not found"), { status: 400 });
+		}
+		if (Number(quantity) < Number(plan.minimum_quantity)) {
+			throw Object.assign(new Error(`Minimum quantity is ${plan.minimum_quantity}`), { status: 400 });
 		}
 		const lines = [];
 		for (const item of items) lines.push(await resolveItem(client, item));
@@ -317,7 +393,7 @@ async function createSubscription(req, res) {
 			  lpad(nextval('commercial_number_seq')::text,6,'0'),
 			  $1, id, $2, price, billing_frequency, 'draft', $3, $4, $3, $3, $5, $6, $7, $8
 			 FROM subscription_plans WHERE id=$9 RETURNING id`,
-			[customerId, quantity, startDate || null, expiryDate || null, paymentTerms || null,
+			[customerId, quantity, requestedStart, expiryDate || null, paymentTerms || null,
 				totals.subtotal, totals.taxTotal, totals.total, planId]
 		)).rows[0];
 		for (const line of totals.items) {
@@ -332,7 +408,7 @@ async function createSubscription(req, res) {
 		}
 		await client.query(
 			"INSERT INTO subscription_status_history(subscription_id,status,changed_by) VALUES($1,'draft',$2)",
-			[subscription.id, req.companyUser.id]
+			[subscription.id, req.companyUser?.id || null]
 		);
 		await client.query("COMMIT");
 		return res.status(201).json({ subscription: await getSubscription(subscription.id) });

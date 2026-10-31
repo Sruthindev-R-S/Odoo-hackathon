@@ -1,7 +1,20 @@
 const pool = require("../config/db_connect");
+const { readAuthToken } = require("./auth");
+const jwt = require("jsonwebtoken");
 
 async function requireCompanyUser(req, res, next) {
-	const companyUserId = req.get("x-company-user-id");
+	const headerId = req.get("x-company-user-id");
+	let companyUserId = headerId;
+	const token = readAuthToken(req);
+
+	if (!companyUserId && token) {
+		try {
+			const auth = jwt.verify(token, process.env.JWT_SECRET);
+			companyUserId = auth.companyUserId;
+		} catch {
+			return res.status(401).json({ error: "Invalid or expired authentication token" });
+		}
+	}
 	if (!companyUserId) {
 		return res.status(401).json({ error: "Company user authentication is required" });
 	}

@@ -10,7 +10,7 @@
  *  37. POST  /api/quotations/{quotationId}/send
  *  38. POST  /api/quotations/{quotationId}/confirm
  *
- * All live endpoints require header X-Company-User-Id (attached automatically by apiClient).
+ * All live endpoints require a JWT Bearer token (attached automatically by apiClient).
  * Falls back cleanly to localStorage only when the backend host is unreachable offline.
  */
 

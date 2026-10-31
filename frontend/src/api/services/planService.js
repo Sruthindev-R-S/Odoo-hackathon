@@ -2,12 +2,12 @@
  * Subscription Plan Service Layer
  *
  * Integrates live backend endpoints at http://192.168.0.155:3000:
- *  18. POST   /api/plans                 (X-Company-User-Id: admin)
+ *  18. POST   /api/plans                 (Authorization: Bearer admin JWT)
  *  19. GET    /api/plans                 (?page, ?limit, ?billingFrequency, ?active, ?search)
  *  20. GET    /api/plans/{planId}
- *  21. PATCH  /api/plans/{planId}        (X-Company-User-Id: admin)
- *  22. DELETE /api/plans/{planId}        (X-Company-User-Id: admin)
- *  23. PATCH  /api/plans/{planId}/status (X-Company-User-Id: admin, { active })
+ *  21. PATCH  /api/plans/{planId}        (Authorization: Bearer admin JWT)
+ *  22. DELETE /api/plans/{planId}       (Authorization: Bearer admin JWT)
+ *  23. PATCH  /api/plans/{planId}/status (Authorization: Bearer admin JWT, { active })
  */
 
 import { apiClient, isNetworkOfflineError, isUuid } from '../client.js';
@@ -250,7 +250,9 @@ export const planService = {
               ? filters.billingFrequency
               : undefined,
           active:
-            filters.active !== undefined ? String(filters.active) : undefined,
+            filters.active !== undefined && filters.active !== 'all'
+              ? String(filters.active)
+              : undefined,
           search: filters.search ? filters.search.trim() : undefined,
         },
       });
@@ -285,7 +287,7 @@ export const planService = {
   },
 
   /**
-   * 18. POST /api/plans (X-Company-User-Id: admin)
+  * 18. POST /api/plans (Authorization: Bearer admin JWT)
    */
   async createPlan(planData, actorUser = null) {
     try {
@@ -341,7 +343,7 @@ export const planService = {
   },
 
   /**
-   * 21. PATCH /api/plans/{planId} (X-Company-User-Id: admin)
+  * 21. PATCH /api/plans/{planId} (Authorization: Bearer admin JWT)
    */
   async updatePlan(id, planData, actorUser = null) {
     try {
@@ -442,7 +444,7 @@ export const planService = {
   },
 
   /**
-   * 23. PATCH /api/plans/{planId}/status (X-Company-User-Id: admin, { active })
+  * 23. PATCH /api/plans/{planId}/status (Authorization: Bearer admin JWT, { active })
    */
   async updatePlanStatus(id, active, actorUser = null) {
     const nextActive = Boolean(active);

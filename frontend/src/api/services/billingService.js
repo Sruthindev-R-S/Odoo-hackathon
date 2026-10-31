@@ -224,23 +224,28 @@ export const billingService = {
   /**
    * Get all subscriptions
    */
-  async getSubscriptions(customerId = null) {
+  async getSubscriptions(customerId = null, actorUser = null) {
+    const live = await operationsService.getSubscriptions(
+      actorUser,
+      customerId ? { customerId } : {}
+    );
+    if (live.length > 0 || actorUser) return live;
     const subs = getStoredSubscriptions();
-    if (customerId) {
-      return subs.filter((s) => s.customerId === customerId);
-    }
-    return subs;
+    return customerId ? subs.filter((s) => s.customerId === customerId) : subs;
   },
 
   /**
    * Get all invoices
    */
-  async getInvoices(customerId = null) {
-    const invs = getStoredInvoices();
-    if (customerId) {
-      return invs.filter((i) => i.customerId === customerId);
+  async getInvoices(customerId = null, actorUser = null) {
+    const live = await operationsService.getInvoices(actorUser);
+    if (live.length > 0 || actorUser) {
+      return customerId
+        ? live.filter((invoice) => String(invoice.customerId) === String(customerId))
+        : live;
     }
-    return invs;
+    const invs = getStoredInvoices();
+    return customerId ? invs.filter((i) => i.customerId === customerId) : invs;
   },
 
   /**

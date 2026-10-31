@@ -10,13 +10,19 @@ async function createProductTables() {
 			type VARCHAR(50) NOT NULL,
 			sales_price NUMERIC(12, 2) NOT NULL,
 			cost_price NUMERIC(12, 2) NOT NULL,
-			notes TEXT
+			notes TEXT,
+			active BOOLEAN NOT NULL DEFAULT TRUE
 		);
 	`);
 
 	await pool.query(`
 		ALTER TABLE products
 		ADD COLUMN IF NOT EXISTS type VARCHAR(50) NOT NULL DEFAULT 'standard';
+	`);
+
+	await pool.query(`
+		ALTER TABLE products
+		ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 	`);
 
 	await pool.query(`
@@ -41,7 +47,7 @@ async function createProduct(name, type, salesPrice, costPrice, notes = null) {
 	const query = `
 		INSERT INTO products (name, type, sales_price, cost_price, notes)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, type, sales_price, cost_price, notes;
+		RETURNING id, name, type, sales_price, cost_price, notes, active;
 	`;
 
 	const { rows } = await pool.query(query, [
@@ -56,14 +62,14 @@ async function createProduct(name, type, salesPrice, costPrice, notes = null) {
 
 async function getProducts() {
 	const { rows } = await pool.query(
-		"SELECT id, name, type, sales_price, cost_price, notes FROM products ORDER BY name"
+		"SELECT id, name, type, sales_price, cost_price, notes, active FROM products ORDER BY name"
 	);
 	return rows;
 }
 
 async function getProductById(id) {
 	const { rows } = await pool.query(
-		"SELECT id, name, type, sales_price, cost_price, notes FROM products WHERE id = $1",
+		"SELECT id, name, type, sales_price, cost_price, notes, active FROM products WHERE id = $1",
 		[id]
 	);
 	return rows[0] || null;
@@ -89,7 +95,7 @@ async function updateProduct(id, fields) {
 		`UPDATE products
 		 SET ${updates.join(", ")}
 		 WHERE id = $${values.length}
-		 RETURNING id, name, type, sales_price, cost_price, notes`,
+		 RETURNING id, name, type, sales_price, cost_price, notes, active`,
 		values
 	);
 	return rows[0] || null;
@@ -100,9 +106,8 @@ async function deleteProduct(id) {
 
 	try {
 		await client.query("BEGIN");
-		await client.query("DELETE FROM product_variants WHERE product_id = $1", [id]);
 		const { rows } = await client.query(
-			"DELETE FROM products WHERE id = $1 RETURNING id",
+			"UPDATE products SET active = FALSE WHERE id = $1 RETURNING id, active",
 			[id]
 		);
 		await client.query("COMMIT");

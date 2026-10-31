@@ -10,4 +10,12 @@ export default defineConfig({
     react(),
     babel({ presets: [reactCompilerPreset()] })
   ],
+  server: {
+    proxy: {
+      '/user': 'http://localhost:3000',
+      '/company-users': 'http://localhost:3000',
+      '/products': 'http://localhost:3000',
+      '/api': 'http://localhost:3000',
+    },
+  },
 })

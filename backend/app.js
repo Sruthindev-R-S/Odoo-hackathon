@@ -1,11 +1,30 @@
+require('dotenv').config();
+
 const express = require('express');
 const app = express();
-const port = 3000;
+const port = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
 const cors = require('cors');
-app.use(cors());
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+	.split(',')
+	.map((origin) => origin.trim())
+	.filter(Boolean);
+app.use(
+	cors({
+		origin(origin, callback) {
+			if (!origin || allowedOrigins.includes(origin)) {
+				return callback(null, true);
+			}
+			return callback(new Error('Origin is not allowed by CORS'));
+		},
+	})
+);
+
+app.get('/health', (_req, res) => {
+	res.json({ status: 'ok' });
+});
 
 require("./config/db_connect");
 

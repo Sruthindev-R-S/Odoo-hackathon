@@ -29,6 +29,7 @@ import {
   isNetworkOfflineError,
   isUuid,
   resolveCompanyUserId,
+  getStoredCurrentUser,
 } from '../client.js';
 import { rememberKnownCustomer } from '../../services/authService.js';
 import { calculateTaxesFromRules, taxService } from './taxService.js';
@@ -1255,6 +1256,46 @@ function mapApiHistoryRows(rows = [], extraEvents = []) {
     };
   });
   return [...apiEvents, ...(Array.isArray(extraEvents) ? extraEvents : [])];
+}
+
+function normalizeInvoiceFromApi(raw) {
+    if (!raw) return null;
+    const total = Number(raw.total_amount ?? raw.total ?? 0);
+    const amountDue = Number(raw.outstanding_amount ?? raw.amount_due ?? 0);
+    const amountPaid = Math.max(0, total - amountDue);
+    return {
+      ...raw,
+      id: raw.id,
+      invoiceNumber: raw.invoice_number || raw.invoiceNumber || `INV-${String(raw.id).slice(0, 8)}`,
+      subscriptionId: raw.subscription_id ?? raw.subscriptionId,
+      customerId: raw.customer_id ?? raw.customerId,
+      customerName: raw.customer_name || raw.customerName || '',
+      customerEmail: raw.customer_email || raw.customerEmail || '',
+      date: raw.invoice_date || raw.date || '',
+      dueDate: raw.due_date || raw.dueDate || '',
+      subtotal: Number(raw.subtotal ?? 0),
+      taxAmount: Number(raw.tax_amount ?? raw.taxAmount ?? 0),
+      discountAmount: Number(raw.discount_amount ?? raw.discountAmount ?? 0),
+      total,
+      amountPaid,
+      amountDue,
+      status: raw.status || 'draft',
+      lineItems: Array.isArray(raw.items)
+        ? raw.items.map((item) => ({
+            ...item,
+            id: item.id,
+            productId: item.product_id ?? item.productId,
+            productName: item.product_description || item.product_name || '',
+            quantity: Number(item.quantity) || 1,
+            unitPrice: Number(item.unit_price ?? item.unitPrice ?? 0),
+            amount: Number(item.line_total ?? item.line_amount ?? 0),
+            taxAmount: Number(item.tax_amount ?? 0),
+          }))
+        : [],
+      payments: Array.isArray(raw.payments) ? raw.payments : [],
+      createdAt: raw.created_at || raw.createdAt,
+      updatedAt: raw.updated_at || raw.updatedAt,
+    };
 }
 
 function mapApiSubscriptionToRaw(apiSub, historyRows = null) {
@@ -3130,6 +3171,27 @@ export const operationsService = {
    * Customers strictly receive only their own confirmed, paid, or sent invoices.
    */
   async getInvoices(actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor)) {
+      try {
+        const response = await apiClient.get('/api/invoices', {
+          actorUser: effectiveActor,
+          query: {
+            page: 1,
+            limit: 100,
+          },
+        });
+        const rows = Array.isArray(response)
+          ? response
+          : response?.invoices || [];
+        const invoices = rows.map(normalizeInvoiceFromApi).filter(Boolean);
+        saveUnifiedInvoices(invoices);
+        return invoices;
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
+
     if (!actorUser) return [];
     const all = readUnifiedInvoices();
     if (actorUser.role === 'customer') {
@@ -3214,6 +3276,27 @@ export const operationsService = {
    * Automatically generates Draft invoices across all eligible active, unpaused subscriptions.
    */
   async runBilling(actorUser, options = {}) {
+    if (resolveCompanyUserId(actorUser)) {
+      try {
+        const response = await apiClient.post(
+          '/api/invoices/generate',
+          options.subscriptionId
+            ? { subscriptionId: options.subscriptionId }
+            : {},
+          { actorUser }
+        );
+        return {
+          ...response,
+          createdCount: Array.isArray(response?.results)
+            ? response.results.length
+            : 0,
+          generatedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
+
     if (resolveCompanyUserId(actorUser)) {
       try {
         await this.getSubscriptions(actorUser);
@@ -3400,11 +3483,37 @@ export const operationsService = {
     return inv;
   },
 
-  async confirmInvoice(invoiceId) {
+  async confirmInvoice(invoiceId, actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor) && isUuid(invoiceId)) {
+      try {
+        const response = await apiClient.post(
+          `/api/invoices/${invoiceId}/confirm`,
+          undefined,
+          { actorUser: effectiveActor }
+        );
+        return normalizeInvoiceFromApi(response?.invoice || response);
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
     return this.updateInvoiceStatus(invoiceId, 'confirmed');
   },
 
-  async cancelInvoice(invoiceId) {
+  async cancelInvoice(invoiceId, actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor) && isUuid(invoiceId)) {
+      try {
+        const response = await apiClient.post(
+          `/api/invoices/${invoiceId}/cancel`,
+          undefined,
+          { actorUser: effectiveActor }
+        );
+        return normalizeInvoiceFromApi(response?.invoice || response);
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
     return this.updateInvoiceStatus(invoiceId, 'cancelled');
   },
 
@@ -3433,6 +3542,19 @@ export const operationsService = {
   },
 
   async sendInvoice(invoiceId, actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor) && isUuid(invoiceId)) {
+      try {
+        const response = await apiClient.post(
+          `/api/invoices/${invoiceId}/send`,
+          undefined,
+          { actorUser: effectiveActor }
+        );
+        return normalizeInvoiceFromApi(response?.invoice || response);
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const idx = invoices.findIndex((i) => i.id === invoiceId);
@@ -3458,6 +3580,24 @@ export const operationsService = {
   },
 
   async recordPayment(invoiceId, { amount, method, date, note }, actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor) && isUuid(invoiceId)) {
+      try {
+        const response = await apiClient.post(
+          `/api/invoices/${invoiceId}/payments`,
+          {
+            paymentMethod: method || 'bank_transfer',
+            amount,
+            paymentDate: date,
+            notes: note || '',
+          },
+          { actorUser: effectiveActor }
+        );
+        return normalizeInvoiceFromApi(response?.invoice || response);
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const idx = invoices.findIndex((i) => i.id === invoiceId);
@@ -3527,6 +3667,37 @@ export const operationsService = {
   },
 
   async getPayments(filters = {}, actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor)) {
+      try {
+        const response = await apiClient.get('/api/payments', {
+          actorUser: effectiveActor,
+          query: {
+            page: 1,
+            limit: 100,
+            paymentMethod:
+              filters.method && filters.method !== 'all'
+                ? filters.method
+                : undefined,
+            dateFrom: filters.fromDate || undefined,
+            dateTo: filters.toDate || undefined,
+            search: filters.search || undefined,
+          },
+        });
+        return (response?.payments || response || []).map((payment) => ({
+          ...payment,
+          invoiceId: payment.invoice_id ?? payment.invoiceId,
+          invoiceNumber: payment.invoice_number ?? payment.invoiceNumber,
+          amount: Number(payment.amount ?? 0),
+          date: payment.payment_date ?? payment.date,
+          method: payment.payment_method ?? payment.method,
+          note: payment.notes ?? payment.note ?? '',
+        }));
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
+
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
 
@@ -3596,6 +3767,28 @@ export const operationsService = {
   },
 
   async getPaymentSummary(actorUser) {
+    const effectiveActor = actorUser || getStoredCurrentUser();
+    if (resolveCompanyUserId(effectiveActor)) {
+      try {
+        const response = await apiClient.get('/api/reports/dashboard', {
+          actorUser: effectiveActor,
+        });
+        const summary = response?.summary || response || {};
+        return {
+          totalCollected: Number(summary.revenue_collected ?? summary.totalCollected ?? 0),
+          totalOutstanding: Number(summary.outstanding_amount ?? summary.totalOutstanding ?? 0),
+          overdueAmount: Number(summary.overdue_amount ?? summary.overdueAmount ?? 0),
+          overdueCount: Number(summary.overdue_invoice_count ?? summary.overdueCount ?? 0),
+          paymentCount: Number(summary.total_payments ?? summary.paymentCount ?? 0),
+          confirmedCount: Number(summary.outstanding_invoice_count ?? 0),
+          paidCount: 0,
+          totalInvoices: 0,
+        };
+      } catch (error) {
+        if (!isNetworkOfflineError(error)) throw error;
+      }
+    }
+
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
 

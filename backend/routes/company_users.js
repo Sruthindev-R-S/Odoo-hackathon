@@ -5,6 +5,7 @@ const {
 	acceptEmployee,
 } = require("../models/company_users");
 const { forgotCompanyPassword } = require("../controllers/auth");
+const { signAuthToken } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -66,6 +67,11 @@ router.post("/register", async (req, res) => {
 		return res.status(201).json({
 			message: "Company user registration successful",
 			user,
+			token: signAuthToken({
+				type: "company",
+				companyUserId: user.id,
+				role: user.role,
+			}),
 		});
 	} catch (error) {
 		console.error("Failed to register company user:", error);
@@ -96,6 +102,11 @@ router.post("/login", async (req, res) => {
 		return res.json({
 			message: "Company user login successful",
 			user,
+			token: signAuthToken({
+				type: "company",
+				companyUserId: user.id,
+				role: user.role,
+			}),
 		});
 	} catch (error) {
 		console.error("Failed to log in company user:", error);

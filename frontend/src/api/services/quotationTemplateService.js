@@ -11,7 +11,7 @@
  *  30. PATCH  /api/quotation-templates/{templateId}/items/{itemId}
  *  31. DELETE /api/quotation-templates/{templateId}/items/{itemId}
  *
- * All live endpoints require header X-Company-User-Id (attached automatically by apiClient).
+ * All live endpoints require a JWT Bearer token (attached automatically by apiClient).
  * Falls back cleanly to localStorage only when the backend host is unreachable offline.
  */
 

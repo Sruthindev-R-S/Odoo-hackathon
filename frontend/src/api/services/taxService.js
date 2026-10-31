@@ -6,6 +6,8 @@
  * and individual invoice generation.
  */
 
+import { apiClient, isNetworkOfflineError } from '../client.js';
+
 const STORAGE_KEY = 'brightloop_tax_rules_v1';
 
 const SEED_TAX_RULES = [
@@ -43,6 +45,21 @@ function saveStoredTaxRules(rules) {
   } catch (err) {
     console.error('Failed to persist tax rules', err);
   }
+}
+
+function normalizeTaxRule(raw) {
+  return {
+    ...raw,
+    id: raw.id,
+    name: raw.name || '',
+    rate: Number(raw.percentage ?? raw.rate ?? 0),
+    scope: raw.product_id ? 'product' : 'all',
+    scopeValue: raw.product_id ?? '',
+    scopeLabel: raw.product_id ? `Product ${raw.product_id}` : 'All Subscriptions & Products',
+    isActive: raw.active !== false,
+    createdAt: raw.created_at || raw.createdAt,
+    updatedAt: raw.updated_at || raw.updatedAt,
+  };
 }
 
 function ruleMatchesLine(rule, line, context = {}) {
@@ -148,12 +165,21 @@ export const taxService = {
   },
 
   async getTaxRules() {
-    await new Promise((r) => setTimeout(r, 50));
-    return getStoredTaxRules();
+    try {
+      const response = await apiClient.get('/api/taxes');
+      const rows = Array.isArray(response) ? response : response?.taxes || [];
+      const rules = rows.map(normalizeTaxRule);
+      saveStoredTaxRules(rules);
+      return rules;
+    } catch (error) {
+      if (!isNetworkOfflineError(error) && error.status !== 401 && error.status !== 403) {
+        throw error;
+      }
+      return getStoredTaxRules();
+    }
   },
 
   async createTaxRule(payload) {
-    await new Promise((r) => setTimeout(r, 80));
     const name = (payload.name || '').trim();
     if (!name) {
       throw new Error('Tax rule name is required.');
@@ -167,6 +193,19 @@ export const taxService = {
     const scope = payload.scope || 'all';
     if (scope !== 'all' && !payload.scopeValue) {
       throw new Error('Please choose a target for the selected rule scope.');
+    }
+
+    try {
+      const response = await apiClient.post('/api/taxes', {
+        name,
+        percentage: Math.round(rate * 100) / 100,
+        productId: scope === 'product' ? payload.scopeValue : null,
+      });
+      const created = normalizeTaxRule(response?.tax || response);
+      saveStoredTaxRules([created, ...getStoredTaxRules()]);
+      return created;
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
     }
 
     const rules = getStoredTaxRules();
@@ -190,7 +229,6 @@ export const taxService = {
   },
 
   async updateTaxRule(id, payload) {
-    await new Promise((r) => setTimeout(r, 80));
     const rules = getStoredTaxRules();
     const idx = rules.findIndex((r) => r.id === id);
     if (idx === -1) {
@@ -210,6 +248,24 @@ export const taxService = {
     const scope = payload.scope || rules[idx].scope || 'all';
     if (scope !== 'all' && !payload.scopeValue) {
       throw new Error('Please choose a target for the selected rule scope.');
+    }
+
+    try {
+      const response = await apiClient.patch(`/api/taxes/${id}`, {
+        name,
+        percentage: Math.round(rate * 100) / 100,
+        productId: scope === 'product' ? payload.scopeValue : null,
+        active:
+          payload.isActive !== undefined
+            ? Boolean(payload.isActive)
+            : rules[idx].isActive,
+      });
+      const updated = normalizeTaxRule(response?.tax || response);
+      rules[idx] = updated;
+      saveStoredTaxRules(rules);
+      return updated;
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
     }
 
     const updated = {
@@ -234,11 +290,21 @@ export const taxService = {
   },
 
   async toggleTaxRule(id) {
-    await new Promise((r) => setTimeout(r, 60));
     const rules = getStoredTaxRules();
     const idx = rules.findIndex((r) => r.id === id);
     if (idx === -1) {
       throw new Error('Tax rule not found.');
+    }
+    try {
+      const response = await apiClient.patch(`/api/taxes/${id}`, {
+        active: !rules[idx].isActive,
+      });
+      const updated = normalizeTaxRule(response?.tax || response);
+      rules[idx] = updated;
+      saveStoredTaxRules(rules);
+      return updated;
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
     }
     rules[idx] = {
       ...rules[idx],
@@ -250,11 +316,21 @@ export const taxService = {
   },
 
   async deleteTaxRule(id) {
-    await new Promise((r) => setTimeout(r, 60));
+    // Tax rules have no delete endpoint in the backend contract; deactivate instead.
     const rules = getStoredTaxRules();
+    const idx = rules.findIndex((r) => r.id === id);
+    if (idx === -1) throw new Error('Tax rule not found.');
+    try {
+      const response = await apiClient.patch(`/api/taxes/${id}`, { active: false });
+      const updated = normalizeTaxRule(response?.tax || response);
+      rules[idx] = updated;
+      saveStoredTaxRules(rules);
+      return { success: true };
+    } catch (error) {
+      if (!isNetworkOfflineError(error)) throw error;
+    }
     const filtered = rules.filter((r) => r.id !== id);
     saveStoredTaxRules(filtered);
     return { success: true };
   },
 };
-

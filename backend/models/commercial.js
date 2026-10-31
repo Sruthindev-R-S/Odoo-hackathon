@@ -285,7 +285,7 @@ function calculateTotals(items) {
 async function resolveItem(client, item) {
 	const productId = item.product_id ?? item.productId;
 	const product = (await client.query(
-		"SELECT id, name, sales_price FROM products WHERE id = $1", [productId]
+		"SELECT id, name, sales_price FROM products WHERE id = $1 AND active = TRUE", [productId]
 	)).rows[0];
 	if (!product) throw Object.assign(new Error("Product not found"), { status: 400 });
 
@@ -293,7 +293,7 @@ async function resolveItem(client, item) {
 	let variant = null;
 	if (variantId) {
 		variant = (await client.query(
-			"SELECT id, variant_name, additional_price FROM product_variants WHERE id = $1 AND product_id = $2",
+			"SELECT id, variant_name, additional_price FROM product_variants WHERE id = $1 AND product_id = $2 AND active = TRUE",
 			[variantId, product.id]
 		)).rows[0];
 		if (!variant) throw Object.assign(new Error("Variant does not belong to product"), { status: 400 });

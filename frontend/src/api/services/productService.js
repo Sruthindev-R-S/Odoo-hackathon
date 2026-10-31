@@ -246,8 +246,7 @@ export const productService = {
         additionalPrice: Number(
           variant.additionalPrice ?? variant.extraPrice ?? 0
         ),
-      },
-      { includeCompanyHeader: false }
+      }
     );
     return normalizeVariantFromApi(res?.variant || res);
   },
@@ -272,8 +271,7 @@ export const productService = {
           variant.extraPrice !== undefined
             ? Number(variant.additionalPrice ?? variant.extraPrice ?? 0)
             : undefined,
-      },
-      { includeCompanyHeader: false }
+      }
     );
     return normalizeVariantFromApi(res?.variant || res);
   },
@@ -282,9 +280,7 @@ export const productService = {
    * 17. DELETE /products/{productId}/variants/{variantId}
    */
   async deactivateVariant(productId, variantId) {
-    await apiClient.delete(`/products/${productId}/variants/${variantId}`, {
-      includeCompanyHeader: false,
-    });
+    await apiClient.delete(`/products/${productId}/variants/${variantId}`);
     return true;
   },
 
@@ -301,8 +297,7 @@ export const productService = {
           salesPrice: Number(productData.salesPrice) || 0,
           costPrice: Number(productData.costPrice) || 0,
           notes: productData.notes ? productData.notes.trim() : '',
-        },
-        { includeCompanyHeader: false }
+        }
       );
       const createdProd = res?.product || res;
       const createdVariants = [];
@@ -379,8 +374,7 @@ export const productService = {
             productData.notes !== undefined
               ? productData.notes.trim()
               : undefined,
-        },
-        { includeCompanyHeader: false }
+        }
       );
       const updatedProd = res?.product || res;
 
@@ -485,9 +479,7 @@ export const productService = {
    */
   async deleteProduct(id) {
     try {
-      await apiClient.delete(`/products/${id}`, {
-        includeCompanyHeader: false,
-      });
+      await apiClient.delete(`/products/${id}`);
       setStoredProducts(getStoredProducts().filter((p) => p.id !== id));
       return true;
     } catch (err) {
