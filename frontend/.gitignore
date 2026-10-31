@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Extra dashboard pages
+src/pages/admin/
+src/pages/staff/
+src/pages/customer/
+
