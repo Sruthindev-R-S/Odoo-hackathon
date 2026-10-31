@@ -11,7 +11,12 @@
  * - Duplicate-billing & skip prevention via deterministic billing cycle keys
  */
 
-import { calculateTaxesFromRules, taxService } from './taxService';
+import { calculateTaxesFromRules, taxService } from './taxService.js';
+import {
+  evaluateApplicableDiscount,
+  consumeDiscountRuleUsage,
+  releaseDiscountRuleUsage,
+} from './discountService.js';
 
 const SUBSCRIPTIONS_KEY = 'brightloop_subscriptions_v1';
 const LEGACY_SUBSCRIPTIONS_KEY = 'brightloop_subscriptions';
@@ -49,96 +54,180 @@ function getProductsMap() {
 }
 
 function addPeriodToDate(dateStr, period) {
-  const base = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
+  const base = dateStr ? new Date(`${dateStr}T00:00:00Z`) : new Date();
   if (Number.isNaN(base.getTime())) {
     return new Date().toISOString().slice(0, 10);
   }
   const d = new Date(base);
-  if (period === 'daily') d.setDate(d.getDate() + 1);
-  else if (period === 'weekly') d.setDate(d.getDate() + 7);
-  else if (period === 'yearly') d.setFullYear(d.getFullYear() + 1);
-  else d.setMonth(d.getMonth() + 1);
+  if (period === 'daily') d.setUTCDate(d.getUTCDate() + 1);
+  else if (period === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+  else if (period === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
+  else d.setUTCMonth(d.getUTCMonth() + 1);
   return d.toISOString().slice(0, 10);
 }
 
 function normalizeSubscription(raw) {
   if (!raw) return raw;
-  const firstItem = Array.isArray(raw.lineItems) && raw.lineItems.length > 0 ? raw.lineItems[0] : null;
-  const quantity = Math.max(1, Number(raw.quantity) || 1);
-  const unitPrice = Number(raw.unitPrice ?? raw.baseUnitPrice) || 0;
-  // Pre-tax recurring base amount so taxes are never compounded on renewal billing runs
-  const preTaxSubtotal =
+  const productsById = getProductsMap();
+  const billingPeriod = raw.billingPeriod || 'monthly';
+  const firstItem =
+    Array.isArray(raw.lineItems) && raw.lineItems.length > 0
+      ? raw.lineItems[0]
+      : null;
+  const fallbackQuantity = Math.max(1, Number(raw.quantity) || 1);
+  const fallbackUnitPrice = Number(raw.unitPrice ?? raw.baseUnitPrice) || 0;
+  const fallbackPreTaxSubtotal =
     Number(
       raw.subtotal ??
         raw.recurringAmount ??
-        (unitPrice > 0 ? unitPrice * quantity : raw.amount)
+        (fallbackUnitPrice > 0 ? fallbackUnitPrice * fallbackQuantity : raw.amount)
     ) || 0;
 
-  const productName =
+  const primaryProductName =
     raw.productName ||
-    (firstItem?.name ? firstItem.name : '') ||
+    firstItem?.productName ||
+    firstItem?.name ||
     raw.planName ||
     'Subscription Item';
-  const variantLabel = raw.variantLabel ?? firstItem?.variant ?? '';
+  const primaryVariantLabel = raw.variantLabel ?? firstItem?.variant ?? '';
 
-  const lineItems =
+  const rawLines =
     Array.isArray(raw.lineItems) && raw.lineItems.length > 0
-      ? raw.lineItems.map((item, idx) => {
-          const desc =
-            item.description ||
-            (item.variant ? `${item.name} (${item.variant})` : item.name || productName);
-          return {
-            id: item.id || `line_${raw.id}_${idx}`,
-            name: item.name || desc,
-            description: desc,
-            variant: item.variant || null,
-            productId: item.productId || (idx === 0 ? raw.productId || '' : ''),
-            productType: item.productType || '',
-            quantity: Math.max(1, Number(item.quantity) || 1),
-            unitPrice: Number(item.unitPrice) || 0,
-            amount: Number(item.amount) || 0,
-          };
-        })
+      ? raw.lineItems
       : [
           {
             id: `line_${raw.id || 'sub'}_0`,
-            name: `${raw.planName || 'Plan'} (${productName})`,
-            description: variantLabel
-              ? `${productName} (${variantLabel}) — ${raw.planName || 'Plan'}`
-              : `${productName} — ${raw.planName || 'Plan'}`,
-            variant: variantLabel || null,
             productId: raw.productId || '',
-            productType: '',
-            quantity,
-            unitPrice,
-            amount: preTaxSubtotal,
+            productName: primaryProductName,
+            name: primaryProductName,
+            description: primaryVariantLabel
+              ? `${primaryProductName} (${primaryVariantLabel})`
+              : primaryProductName,
+            variant: primaryVariantLabel || null,
+            variantExtraPrice: Number(raw.variantExtraPrice) || 0,
+            quantity: fallbackQuantity,
+            unitPrice: fallbackUnitPrice,
+            amount: fallbackPreTaxSubtotal,
           },
         ];
+
+  const lineItems = rawLines.map((item, idx) => {
+    const qty = Math.max(1, Number(item.quantity) || 1);
+    const uPrice = Number(item.unitPrice) || 0;
+    const untaxedAmount =
+      Math.round(
+        (item.amount !== undefined && Number(item.amount) > 0
+          ? Number(item.amount)
+          : uPrice * qty) * 100
+      ) / 100;
+    const prodId = item.productId || (idx === 0 ? raw.productId || '' : '');
+    const prodName =
+      item.productName || item.name || (idx === 0 ? primaryProductName : 'Product');
+    const variantText = item.variant || item.variantLabel || null;
+    const desc =
+      item.description ||
+      (variantText ? `${prodName} (${variantText})` : prodName);
+
+    const lineTax = calculateTaxesFromRules(
+      [
+        {
+          productId: prodId,
+          productType: item.productType || '',
+          amount: untaxedAmount,
+        },
+      ],
+      {
+        billingPeriod,
+        defaultProductId: prodId,
+        defaultProductType: prodId ? productsById.get(prodId)?.type || '' : '',
+        productsById,
+      }
+    );
+
+    return {
+      id: item.id || `line_${raw.id || 'sub'}_${idx}`,
+      productId: prodId,
+      productName: prodName,
+      name: item.name || prodName,
+      description: desc,
+      variantId: item.variantId || '',
+      variant: variantText,
+      variantExtraPrice: Number(item.variantExtraPrice) || 0,
+      productType: item.productType || '',
+      quantity: qty,
+      unitPrice: uPrice,
+      amount: untaxedAmount,
+      taxRate: lineTax.taxRate,
+      taxAmount: lineTax.taxAmount,
+      totalWithTax: lineTax.total,
+    };
+  });
+
+  const preferredDiscountRuleId = raw.preferredDiscountRuleId || '';
+  const discCalc = evaluateApplicableDiscount(lineItems, {
+    evalDate: new Date().toISOString().slice(0, 10),
+    preferredRuleId: preferredDiscountRuleId,
+  });
+
+  const taxableLines = discCalc.discountedLines.map((dl) => ({
+    ...dl,
+    amount: dl.netAmount,
+  }));
+
+  const subTaxCalc = calculateTaxesFromRules(taxableLines, {
+    billingPeriod,
+    defaultProductId: raw.productId || lineItems[0]?.productId || '',
+    productsById,
+  });
 
   const startDate = raw.startDate || new Date().toISOString().slice(0, 10);
   const nextBillingDate =
     raw.nextBillingDate ||
     raw.currentPeriodEnd ||
-    addPeriodToDate(startDate, raw.billingPeriod || 'monthly');
+    addPeriodToDate(startDate, billingPeriod);
+
+  const leadLine = lineItems[0];
 
   return {
     ...raw,
+    templateId: raw.templateId || '',
+    templateName: raw.templateName || '',
+    validityDays:
+      raw.validityDays !== undefined && raw.validityDays !== null && raw.validityDays !== ''
+        ? Number(raw.validityDays)
+        : null,
+    preferredDiscountRuleId,
     customerName: raw.customerName || 'Customer',
     customerEmail: raw.customerEmail || '',
     customerOrganization: raw.customerOrganization || raw.organization || '',
     organization: raw.organization || raw.customerOrganization || '',
     billingAddress: raw.billingAddress || '',
     planName: raw.planName || 'Subscription Plan',
-    billingPeriod: raw.billingPeriod || 'monthly',
-    productId: raw.productId || '',
-    productName,
-    variantLabel,
-    variantExtraPrice: Number(raw.variantExtraPrice) || 0,
-    baseUnitPrice: Number(raw.baseUnitPrice ?? unitPrice) || 0,
-    unitPrice,
-    quantity,
-    subtotal: preTaxSubtotal,
-    recurringAmount: preTaxSubtotal,
+    billingPeriod,
+    productId: raw.productId || leadLine?.productId || '',
+    productName: leadLine?.productName || primaryProductName,
+    variantLabel:
+      raw.variantLabel !== undefined
+        ? raw.variantLabel
+        : leadLine?.variant || '',
+    variantExtraPrice:
+      Number(raw.variantExtraPrice ?? leadLine?.variantExtraPrice) || 0,
+    baseUnitPrice:
+      Number(raw.baseUnitPrice ?? leadLine?.unitPrice ?? fallbackUnitPrice) || 0,
+    unitPrice: Number(leadLine?.unitPrice ?? fallbackUnitPrice) || 0,
+    quantity: Number(leadLine?.quantity ?? fallbackQuantity) || 1,
+    grossSubtotal: discCalc.grossSubtotal,
+    discountRuleId: discCalc.discountRuleId,
+    discountName: discCalc.discountName,
+    discountLabel: discCalc.discountLabel,
+    discountAmount: discCalc.discountAmount,
+    discountStoppedReason: discCalc.stoppedReason,
+    subtotal: discCalc.netSubtotal,
+    recurringAmount: discCalc.netSubtotal,
+    taxLines: subTaxCalc.taxLines,
+    taxRate: subTaxCalc.taxRate,
+    taxAmount: subTaxCalc.taxAmount,
+    totalWithTax: subTaxCalc.total,
     paymentTerms: raw.paymentTerms || 'Due on receipt',
     status: raw.status || 'draft',
     isPaused: Boolean(raw.isPaused),
@@ -306,6 +395,15 @@ function normalizeInvoice(raw, subsById = new Map()) {
       (linkedSub ? `${linkedSub.startDate} — ${linkedSub.nextBillingDate}` : ''),
     lines: normalizedLines,
     lineItems: normalizedLines,
+    grossSubtotal:
+      Math.round(
+        Number(raw.grossSubtotal ?? (computedLineSum || subtotal)) * 100
+      ) / 100,
+    discountRuleId: raw.discountRuleId || '',
+    discountName: raw.discountName || '',
+    discountLabel: raw.discountLabel || '',
+    discountAmount: Math.round((Number(raw.discountAmount) || 0) * 100) / 100,
+    discountUsageConsumed: Boolean(raw.discountUsageConsumed),
     subtotal,
     taxLines,
     taxRate:
@@ -396,7 +494,7 @@ function saveUnifiedInvoices(invoices, existingSubs = null) {
 }
 
 function belongsToCustomer(record, user) {
-  if (!user) return true; // Unauthenticated demo mode previews local session records
+  if (!user) return false;
   if (user.customerId && record.customerId && record.customerId === user.customerId) {
     return true;
   }
@@ -409,8 +507,14 @@ function belongsToCustomer(record, user) {
   return false;
 }
 
-function buildInvoiceFromSubscription(sub, seqNumber, actorUser, productsById) {
-  const today = new Date().toISOString().slice(0, 10);
+function buildInvoiceFromSubscription(
+  sub,
+  seqNumber,
+  actorUser,
+  productsById,
+  evalDateOverride = null
+) {
+  const today = evalDateOverride || new Date().toISOString().slice(0, 10);
   const dueDate = addPeriodToDate(today, 'weekly');
   const cycleKey = `${sub.id}_${sub.nextBillingDate}`;
 
@@ -428,7 +532,7 @@ function buildInvoiceFromSubscription(sub, seqNumber, actorUser, productsById) {
             productId: sub.productId || '',
             quantity: sub.quantity,
             unitPrice: sub.unitPrice,
-            amount: sub.recurringAmount,
+            amount: sub.grossSubtotal ?? sub.recurringAmount,
           },
         ];
 
@@ -436,6 +540,12 @@ function buildInvoiceFromSubscription(sub, seqNumber, actorUser, productsById) {
     const desc =
       item.description ||
       (item.variant ? `${item.name} (${item.variant})` : item.name);
+    const qty = Math.max(1, Number(item.quantity) || 1);
+    const uPrice = Number(item.unitPrice) || 0;
+    const lineAmt =
+      item.amount !== undefined && Number(item.amount) > 0
+        ? Number(item.amount)
+        : Math.round(qty * uPrice * 100) / 100;
     return {
       id: `inv_line_${Date.now()}_${seqNumber}_${idx}`,
       name: item.name || desc,
@@ -443,22 +553,38 @@ function buildInvoiceFromSubscription(sub, seqNumber, actorUser, productsById) {
       variant: item.variant || null,
       productId: item.productId || (idx === 0 ? sub.productId || '' : ''),
       productType: item.productType || '',
-      quantity: Math.max(1, Number(item.quantity) || 1),
-      unitPrice: Number(item.unitPrice) || 0,
-      amount: Number(item.amount) || 0,
+      quantity: qty,
+      unitPrice: uPrice,
+      amount: lineAmt,
     };
   });
+
+  const discCalc = evaluateApplicableDiscount(lines, {
+    evalDate: today,
+    preferredRuleId: sub.preferredDiscountRuleId || '',
+  });
+
+  const taxableLines = discCalc.discountedLines.map((dl) => ({
+    ...dl,
+    amount: dl.netAmount,
+  }));
 
   const defaultProductType = sub.productId
     ? productsById.get(sub.productId)?.type || ''
     : '';
 
-  const taxCalc = calculateTaxesFromRules(lines, {
+  const taxCalc = calculateTaxesFromRules(taxableLines, {
     billingPeriod: sub.billingPeriod,
     defaultProductId: sub.productId,
     defaultProductType,
     productsById,
   });
+
+  let discountUsageConsumed = false;
+  if (discCalc.discountAmount > 0 && discCalc.discountRuleId) {
+    consumeDiscountRuleUsage(discCalc.discountRuleId);
+    discountUsageConsumed = true;
+  }
 
   const nowIso = new Date().toISOString();
 
@@ -482,6 +608,12 @@ function buildInvoiceFromSubscription(sub, seqNumber, actorUser, productsById) {
     dueDate,
     lines,
     lineItems: lines,
+    grossSubtotal: discCalc.grossSubtotal,
+    discountRuleId: discCalc.discountRuleId,
+    discountName: discCalc.discountName,
+    discountLabel: discCalc.discountLabel,
+    discountAmount: discCalc.discountAmount,
+    discountUsageConsumed,
     subtotal: taxCalc.subtotal,
     taxLines: taxCalc.taxLines,
     taxRate: taxCalc.taxRate,
@@ -508,32 +640,96 @@ export const operationsService = {
    */
   async getSubscriptions(actorUser) {
     await new Promise((r) => setTimeout(r, 50));
+    if (!actorUser) return [];
     const all = readUnifiedSubscriptions();
-    if (!actorUser || actorUser.role === 'customer') {
-      if (actorUser?.role === 'customer') {
-        return all.filter((sub) => belongsToCustomer(sub, actorUser));
-      }
+    if (actorUser.role === 'customer') {
+      return all.filter((sub) => belongsToCustomer(sub, actorUser));
     }
     return all;
   },
 
   /**
-   * Create a new subscription or quotation.
+   * Create a new subscription or quotation (supports Quotation Templates and multi-product lines).
    */
   async createSubscription(payload, actorUser) {
     await new Promise((r) => setTimeout(r, 90));
+    if (!actorUser) {
+      throw new Error('Authentication required.');
+    }
     const all = readUnifiedSubscriptions();
-
-    const quantity = Math.max(1, Number(payload.quantity) || 1);
     const minQty = Number(payload.minQuantity) || 1;
-    if (quantity < minQty) {
-      throw new Error(`Quantity must be at least the plan minimum (${minQty}).`);
+    const planLabel = payload.planName || 'Standard Plan';
+
+    let preparedLines = [];
+    if (Array.isArray(payload.lines) && payload.lines.length > 0) {
+      preparedLines = payload.lines.map((line, idx) => {
+        const qty = Math.max(1, Number(line.quantity) || 1);
+        const uPrice = Math.max(0, Number(line.unitPrice) || 0);
+        const pName = line.productName || line.name || 'Product';
+        const vLabel = line.variantLabel || line.variant || '';
+        const desc = vLabel ? `${pName} (${vLabel})` : pName;
+        return {
+          id: line.id || `line_${Date.now()}_${idx}`,
+          productId: line.productId || '',
+          productName: pName,
+          name: pName,
+          description: desc,
+          variantId: line.variantId || '',
+          variant: vLabel || null,
+          variantExtraPrice: Number(line.variantExtraPrice) || 0,
+          quantity: qty,
+          unitPrice: uPrice,
+          amount: Math.round(qty * uPrice * 100) / 100,
+        };
+      });
+
+      const primaryLine =
+        preparedLines.find(
+          (l) => payload.productId && l.productId === payload.productId
+        ) || preparedLines[0];
+
+      if ((primaryLine?.quantity || 0) < minQty) {
+        throw new Error(
+          `Primary plan line quantity must be at least the plan minimum (${minQty}).`
+        );
+      }
+    } else {
+      const quantity = Math.max(1, Number(payload.quantity) || 1);
+      if (quantity < minQty) {
+        throw new Error(
+          `Quantity must be at least the plan minimum (${minQty}).`
+        );
+      }
+      const baseUnitPrice = Number(payload.baseUnitPrice) || 0;
+      const variantExtraPrice = Number(payload.variantExtraPrice) || 0;
+      const unitPrice = baseUnitPrice + variantExtraPrice;
+      const lineAmount = Math.round(unitPrice * quantity * 100) / 100;
+      const productName = payload.productName || planLabel;
+      const variantLabel = payload.variantLabel || '';
+      const lineDesc = variantLabel
+        ? `${productName} (${variantLabel}) — ${planLabel}`
+        : `${productName} — ${planLabel}`;
+
+      preparedLines = [
+        {
+          id: `line_${Date.now()}_0`,
+          productId: payload.productId || '',
+          productName,
+          name: productName,
+          description: lineDesc,
+          variant: variantLabel || null,
+          variantExtraPrice,
+          quantity,
+          unitPrice,
+          amount: lineAmount,
+        },
+      ];
     }
 
-    const baseUnitPrice = Number(payload.baseUnitPrice) || 0;
-    const variantExtraPrice = Number(payload.variantExtraPrice) || 0;
-    const unitPrice = baseUnitPrice + variantExtraPrice;
-    const recurringAmount = unitPrice * quantity;
+    const subtotal = Math.round(
+      preparedLines.reduce((sum, l) => sum + l.amount, 0) * 100
+    ) / 100;
+    const leadLine = preparedLines[0];
 
     const today = new Date().toISOString().slice(0, 10);
     const startDate = payload.startDate || today;
@@ -544,19 +740,28 @@ export const operationsService = {
     const initialStatus = payload.initialStatus || 'draft';
     const seq = 1001 + all.length;
 
-    const productName = payload.productName || payload.planName || 'Subscription Item';
-    const variantLabel = payload.variantLabel || '';
-    const lineDesc = variantLabel
-      ? `${productName} (${variantLabel}) — ${payload.planName || 'Standard Plan'}`
-      : `${productName} — ${payload.planName || 'Standard Plan'}`;
+    const templateSuffix = payload.templateName
+      ? ` from template "${payload.templateName}"`
+      : '';
+    const initLabel =
+      initialStatus === 'active'
+        ? 'Subscription started via self-service portal'
+        : initialStatus === 'quotation'
+        ? `Quotation created${templateSuffix}`
+        : `Draft created${templateSuffix}`;
 
     const newSub = normalizeSubscription({
       id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       subscriptionNumber: `SUB-${seq}`,
+      templateId: payload.templateId || '',
+      templateName: payload.templateName || '',
+      validityDays: payload.validityDays ? Number(payload.validityDays) : null,
+      preferredDiscountRuleId: payload.preferredDiscountRuleId || '',
       customerId:
         payload.customerId ||
-        actorUser?.customerId ||
-        actorUser?.id ||
+        (actorUser?.role === 'customer'
+          ? actorUser.customerId || actorUser.id
+          : undefined) ||
         `cust_${Date.now()}`,
       customerName: (payload.customerName || actorUser?.name || 'Customer').trim(),
       customerEmail: (payload.customerEmail || actorUser?.email || '')
@@ -568,29 +773,18 @@ export const operationsService = {
         ''
       ).trim(),
       planId: payload.planId || '',
-      planName: payload.planName || 'Standard Plan',
+      planName: planLabel,
       billingPeriod,
-      productId: payload.productId || '',
-      productName,
-      variantLabel,
-      variantExtraPrice,
-      baseUnitPrice,
-      unitPrice,
-      quantity,
-      subtotal: recurringAmount,
-      recurringAmount,
-      lineItems: [
-        {
-          id: `line_${Date.now()}`,
-          name: `${payload.planName || 'Standard Plan'} (${productName})`,
-          description: lineDesc,
-          variant: variantLabel || null,
-          productId: payload.productId || '',
-          quantity,
-          unitPrice,
-          amount: recurringAmount,
-        },
-      ],
+      productId: leadLine?.productId || payload.productId || '',
+      productName: leadLine?.productName || planLabel,
+      variantLabel: leadLine?.variant || '',
+      variantExtraPrice: Number(leadLine?.variantExtraPrice) || 0,
+      baseUnitPrice: Number(leadLine?.unitPrice) || 0,
+      unitPrice: Number(leadLine?.unitPrice) || 0,
+      quantity: Number(leadLine?.quantity) || 1,
+      subtotal,
+      recurringAmount: subtotal,
+      lineItems: preparedLines,
       paymentTerms: payload.paymentTerms || 'Due on receipt',
       status: initialStatus,
       isPaused: false,
@@ -607,12 +801,7 @@ export const operationsService = {
         {
           id: `evt_${Date.now()}`,
           status: initialStatus,
-          label:
-            initialStatus === 'active'
-              ? 'Subscription started via self-service portal'
-              : initialStatus === 'quotation'
-              ? 'Quotation created'
-              : 'Draft created',
+          label: initLabel,
           actor: actorUser?.name || actorUser?.email || 'System',
           timestamp: new Date().toISOString(),
         },
@@ -627,10 +816,104 @@ export const operationsService = {
   },
 
   /**
+   * Update seat quantities / product lines and discount preference on a non-closed subscription
+   * (e.g. when a customer asks for a better price for taking more seats).
+   */
+  async updateSubscriptionSeatsAndDiscount(
+    id,
+    { lines, preferredDiscountRuleId },
+    actorUser
+  ) {
+    await new Promise((r) => setTimeout(r, 70));
+    if (!actorUser || (actorUser.role !== 'admin' && actorUser.role !== 'staff')) {
+      throw new Error(
+        'Only internal staff or administrators can update subscription pricing or seats.'
+      );
+    }
+
+    const all = readUnifiedSubscriptions();
+    const idx = all.findIndex((s) => s.id === id);
+    if (idx === -1) {
+      throw new Error('Subscription not found.');
+    }
+
+    const existing = all[idx];
+    if (existing.status === 'closed') {
+      throw new Error('Closed subscriptions cannot be modified.');
+    }
+
+    const nextLines =
+      Array.isArray(lines) && lines.length > 0
+        ? lines.map((line, lIdx) => {
+            const qty = Math.max(1, Number(line.quantity) || 1);
+            const uPrice = Math.max(0, Number(line.unitPrice) || 0);
+            const pName = line.productName || line.name || 'Product';
+            const vLabel = line.variantLabel ?? line.variant ?? '';
+            const desc = vLabel ? `${pName} (${vLabel})` : pName;
+            return {
+              ...line,
+              id: line.id || `line_${Date.now()}_${lIdx}`,
+              productId: line.productId || '',
+              productName: pName,
+              name: pName,
+              description: desc,
+              variant: vLabel || null,
+              quantity: qty,
+              unitPrice: uPrice,
+              amount: Math.round(qty * uPrice * 100) / 100,
+            };
+          })
+        : existing.lineItems;
+
+    const leadLine = nextLines[0] || existing.lineItems?.[0];
+    const nowIso = new Date().toISOString();
+    const nextRulePref =
+      preferredDiscountRuleId !== undefined
+        ? preferredDiscountRuleId
+        : existing.preferredDiscountRuleId || '';
+
+    const normalized = normalizeSubscription({
+      ...existing,
+      preferredDiscountRuleId: nextRulePref,
+      quantity: Number(leadLine?.quantity ?? existing.quantity) || 1,
+      unitPrice: Number(leadLine?.unitPrice ?? existing.unitPrice) || 0,
+      lineItems: nextLines,
+      updatedAt: nowIso,
+    });
+
+    const totalSeats = normalized.lineItems.reduce(
+      (sum, l) => sum + (Number(l.quantity) || 0),
+      0
+    );
+    const discountNote =
+      normalized.discountAmount > 0
+        ? ` — ${normalized.discountLabel} active`
+        : '';
+
+    normalized.history = [
+      ...(existing.history || []),
+      {
+        id: `evt_seats_${Date.now()}`,
+        status: normalized.status,
+        label: `Updated seats/pricing (${totalSeats} total qty)${discountNote}`,
+        actor: actorUser.name || actorUser.email || 'Operator',
+        timestamp: nowIso,
+      },
+    ];
+
+    all[idx] = normalized;
+    saveUnifiedSubscriptions(all);
+    return normalized;
+  },
+
+  /**
    * Transition a subscription state according to lifecycle and plan switches.
    */
   async transitionSubscription(id, action, actorUser) {
     await new Promise((r) => setTimeout(r, 80));
+    if (!actorUser) {
+      throw new Error('Authentication required.');
+    }
     const all = readUnifiedSubscriptions();
     const idx = all.findIndex((s) => s.id === id);
     if (idx === -1) {
@@ -639,12 +922,12 @@ export const operationsService = {
 
     const sub = { ...all[idx] };
 
-    if (actorUser?.role === 'customer' && !belongsToCustomer(sub, actorUser)) {
+    if (actorUser.role === 'customer' && !belongsToCustomer(sub, actorUser)) {
       throw new Error('You do not have permission to modify this subscription.');
     }
 
     let eventLabel = '';
-    const actorName = actorUser?.name || actorUser?.email || 'Operator';
+    const actorName = actorUser.name || actorUser.email || 'Operator';
 
     switch (action) {
       case 'send_quotation': {
@@ -652,7 +935,7 @@ export const operationsService = {
           throw new Error('Only Draft records can be sent as a Quotation.');
         }
         sub.status = 'quotation';
-        eventLabel = 'Sent quotation to customer';
+        eventLabel = 'Moved from Draft to Quotation';
         break;
       }
       case 'confirm': {
@@ -709,8 +992,17 @@ export const operationsService = {
         if (sub.status === 'closed') {
           throw new Error('Subscription is already closed.');
         }
-        if (sub.status === 'active' && !sub.planRules?.allowEarlyClose) {
-          throw new Error('This plan does not permit early closure.');
+        const today = new Date().toISOString().slice(0, 10);
+        const isBeforeExpiry = !sub.expiryDate || today < sub.expiryDate;
+        if (
+          sub.status === 'active' &&
+          isBeforeExpiry &&
+          !sub.planRules?.allowEarlyClose &&
+          actorUser.role !== 'admin'
+        ) {
+          throw new Error(
+            'This plan does not permit early closure before its expiry date.'
+          );
         }
         sub.status = 'closed';
         sub.isPaused = false;
@@ -740,12 +1032,13 @@ export const operationsService = {
 
   /**
    * Fetch invoices scoped by role.
-   * Customers receive confirmed, paid, or explicitly sent invoices belonging to their account.
+   * Customers strictly receive only their own confirmed, paid, or sent invoices.
    */
   async getInvoices(actorUser) {
     await new Promise((r) => setTimeout(r, 50));
+    if (!actorUser) return [];
     const all = readUnifiedInvoices();
-    if (actorUser?.role === 'customer') {
+    if (actorUser.role === 'customer') {
       return all.filter(
         (inv) =>
           belongsToCustomer(inv, actorUser) &&
@@ -761,7 +1054,7 @@ export const operationsService = {
    * Automatically populates customer details, product lines, taxes from Admin rules, and totals.
    * Prevents duplicate billing for the same cycle key.
    */
-  async generateInvoiceForSubscription(subscriptionId, actorUser) {
+  async generateInvoiceForSubscription(subscriptionId, actorUser, options = {}) {
     await new Promise((r) => setTimeout(r, 80));
     const subs = readUnifiedSubscriptions();
     const subIdx = subs.findIndex((s) => s.id === subscriptionId);
@@ -791,7 +1084,13 @@ export const operationsService = {
 
     const productsById = getProductsMap();
     const seq = 2001 + invoices.length;
-    const newInvoice = buildInvoiceFromSubscription(sub, seq, actorUser, productsById);
+    const newInvoice = buildInvoiceFromSubscription(
+      sub,
+      seq,
+      actorUser,
+      productsById,
+      options.billingDate || null
+    );
 
     invoices.unshift(newInvoice);
     saveUnifiedInvoices(invoices, subs);
@@ -801,16 +1100,16 @@ export const operationsService = {
   /**
    * Billing Day Run:
    * Automatically generates Draft invoices across all eligible active, unpaused subscriptions,
-   * pre-filling customer details, product & variant lines, automatic taxes from Admin rules,
-   * and totals. Guarantees nothing is billed twice or unexpectedly skipped.
+   * pre-filling customer details, product & variant lines, automatic discounts, automatic taxes
+   * from Admin rules, and totals. Guarantees nothing is billed twice or unexpectedly skipped.
    */
-  async runBilling(actorUser) {
+  async runBilling(actorUser, options = {}) {
     await new Promise((r) => setTimeout(r, 140));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const runs = readRawArray(BILLING_RUNS_KEY);
     const productsById = getProductsMap();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = options.billingDate || new Date().toISOString().slice(0, 10);
 
     // Enforce autoCloseOnEnd for any active subscription past its end date before billing
     let subsModified = false;
@@ -864,7 +1163,13 @@ export const operationsService = {
       }
 
       const seq = 2001 + invoices.length;
-      const draftInv = buildInvoiceFromSubscription(sub, seq, actorUser, productsById);
+      const draftInv = buildInvoiceFromSubscription(
+        sub,
+        seq,
+        actorUser,
+        productsById,
+        today
+      );
       invoices.unshift(draftInv);
       createdCount += 1;
     });
@@ -879,13 +1184,20 @@ export const operationsService = {
         ? activeRules.map((r) => `${r.name} (${r.rate}%)`).join(', ')
         : '0% (No active tax rules)';
 
+    const nowIso = new Date().toISOString();
     const runSummary = {
       id: `run_${Date.now()}`,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
+      createdAt: nowIso,
+      runDate: today,
       actor: actorUser?.name || actorUser?.email || 'Operator',
       eligibleCount: eligible.length,
       createdCount,
       skippedCount,
+      failedCount: 0,
+      created: createdCount,
+      skipped: skippedCount,
+      failed: 0,
       pausedCount,
       autoClosedCount,
       appliedTaxSummary,
@@ -923,6 +1235,10 @@ export const operationsService = {
       if (inv.status === 'paid' || inv.amountPaid > 0) {
         throw new Error('Paid or partially paid invoices cannot be cancelled.');
       }
+      if (inv.discountUsageConsumed && inv.discountRuleId) {
+        releaseDiscountRuleUsage(inv.discountRuleId);
+        inv.discountUsageConsumed = false;
+      }
       inv.status = 'cancelled';
       inv.amountDue = 0;
     } else {
@@ -933,6 +1249,14 @@ export const operationsService = {
     invoices[idx] = inv;
     saveUnifiedInvoices(invoices, subs);
     return inv;
+  },
+
+  async confirmInvoice(invoiceId) {
+    return this.updateInvoiceStatus(invoiceId, 'confirmed');
+  },
+
+  async cancelInvoice(invoiceId) {
+    return this.updateInvoiceStatus(invoiceId, 'cancelled');
   },
 
   /**
@@ -1019,7 +1343,10 @@ export const operationsService = {
       throw new Error('Invoice is already settled in full.');
     }
 
-    const payAmount = Number(amount);
+    const payAmount =
+      amount !== undefined && amount !== null && amount !== ''
+        ? Number(amount)
+        : Number(inv.amountDue);
     if (!payAmount || payAmount <= 0) {
       throw new Error('Payment amount must be greater than zero.');
     }

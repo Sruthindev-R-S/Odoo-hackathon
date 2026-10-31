@@ -938,6 +938,27 @@ export default function InvoiceManagement({ onConfigureTaxes }) {
               </table>
 
               <div className="bg-zinc-50 border-t border-zinc-200 p-3.5 space-y-1.5 text-xs">
+                {selectedInvoice.discountAmount > 0 && (
+                  <>
+                    <div className="flex justify-between text-zinc-600">
+                      <span>Gross Amount</span>
+                      <span className="tabular-nums font-medium text-zinc-900">
+                        {formatMoney(selectedInvoice.grossSubtotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-emerald-700 font-medium">
+                      <span>
+                        Discount (
+                        {selectedInvoice.discountLabel ||
+                          selectedInvoice.discountName}
+                        )
+                      </span>
+                      <span className="tabular-nums">
+                        -{formatMoney(selectedInvoice.discountAmount)}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-zinc-600">
                   <span>Subtotal</span>
                   <span className="tabular-nums font-medium text-zinc-900">

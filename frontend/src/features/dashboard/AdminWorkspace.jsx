@@ -3,6 +3,8 @@ import AppLayout from '../../layouts/AppLayout';
 import AdminDashboard from './AdminDashboard';
 import ProductManagement from '../products/ProductManagement';
 import PlanManagement from '../plans/PlanManagement';
+import QuotationTemplateManagement from '../templates/QuotationTemplateManagement';
+import DiscountManagement from '../discounts/DiscountManagement';
 import TaxManagement from '../taxes/TaxManagement';
 import CustomerBillingPage from '../billing/CustomerBillingPage';
 import SubscriptionManagement from '../operations/SubscriptionManagement';
@@ -28,6 +30,8 @@ export default function AdminWorkspace({ initialTab = 'dashboard' }) {
       )}
       {currentTab === 'products' && <ProductManagement />}
       {currentTab === 'plans' && <PlanManagement />}
+      {currentTab === 'templates' && <QuotationTemplateManagement />}
+      {currentTab === 'discounts' && <DiscountManagement />}
       {currentTab === 'taxes' && <TaxManagement />}
       {currentTab === 'billing' && <CustomerBillingPage />}
       {currentTab === 'subscriptions' && (

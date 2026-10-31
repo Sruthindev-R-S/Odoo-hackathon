@@ -5,6 +5,8 @@ import {
   LayoutDashboard,
   Package,
   CalendarDays,
+  FileSpreadsheet,
+  Tag,
   Percent,
   Receipt,
   Repeat,
@@ -35,6 +37,18 @@ const ADMIN_NAV_ITEMS = [
     id: 'plans',
     label: 'Subscription Plans',
     icon: CalendarDays,
+    group: 'Catalog & System',
+  },
+  {
+    id: 'templates',
+    label: 'Quotation Templates',
+    icon: FileSpreadsheet,
+    group: 'Catalog & System',
+  },
+  {
+    id: 'discounts',
+    label: 'Discount Rules',
+    icon: Tag,
     group: 'Catalog & System',
   },
   {

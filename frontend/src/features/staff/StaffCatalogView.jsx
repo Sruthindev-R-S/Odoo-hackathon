@@ -1,17 +1,31 @@
 import { useState, useEffect } from 'react';
-import { Package, CalendarDays, Percent, Eye } from 'lucide-react';
+import {
+  Package,
+  CalendarDays,
+  FileSpreadsheet,
+  Tag,
+  Percent,
+  Eye,
+} from 'lucide-react';
 import { productService } from '../../api/services/productService';
 import { planService } from '../../api/services/planService';
+import { quotationTemplateService } from '../../api/services/quotationTemplateService';
+import {
+  discountService,
+  getDiscountRuleStatus,
+} from '../../api/services/discountService';
 import { taxService } from '../../api/services/taxService';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import MoneyText from '../../components/domain/MoneyText';
 import PlanBadge from '../../components/domain/PlanBadge';
-import { formatDate } from '../../lib/format';
+import { formatDate, formatMoney } from '../../lib/format';
 
 export default function StaffCatalogView() {
   const [products, setProducts] = useState([]);
   const [plans, setPlans] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [discountRules, setDiscountRules] = useState([]);
   const [taxRules, setTaxRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [section, setSection] = useState('products');
@@ -20,14 +34,19 @@ export default function StaffCatalogView() {
     let active = true;
     async function loadCatalog() {
       try {
-        const [prodList, planList, ruleList] = await Promise.all([
-          productService.getProducts(),
-          planService.getPlans(),
-          taxService.getTaxRules(),
-        ]);
+        const [prodList, planList, tmplList, discList, ruleList] =
+          await Promise.all([
+            productService.getProducts(),
+            planService.getPlans(),
+            quotationTemplateService.getTemplates(),
+            discountService.getDiscountRules(),
+            taxService.getTaxRules(),
+          ]);
         if (active) {
           setProducts(prodList);
           setPlans(planList);
+          setTemplates(tmplList);
+          setDiscountRules(discList);
           setTaxRules(ruleList);
         }
       } finally {
@@ -81,6 +100,28 @@ export default function StaffCatalogView() {
             }`}
           >
             Plans ({plans.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSection('templates')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              section === 'templates'
+                ? 'bg-zinc-900 text-white'
+                : 'text-zinc-600 hover:text-zinc-900'
+            }`}
+          >
+            Templates ({templates.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setSection('discounts')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              section === 'discounts'
+                ? 'bg-zinc-900 text-white'
+                : 'text-zinc-600 hover:text-zinc-900'
+            }`}
+          >
+            Discounts ({discountRules.length})
           </button>
           <button
             type="button"
@@ -258,6 +299,143 @@ export default function StaffCatalogView() {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      ) : section === 'templates' ? (
+        templates.length === 0 ? (
+          <EmptyState
+            icon={FileSpreadsheet}
+            title="No quotation templates defined"
+            description="Quotation templates created by an administrator will appear here for preparing customer offers."
+          />
+        ) : (
+          <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50/80 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                    <th className="py-3 px-4">Template</th>
+                    <th className="py-3 px-4">Linked Plan</th>
+                    <th className="py-3 px-4">Product Lines</th>
+                    <th className="py-3 px-4">Validity</th>
+                    <th className="py-3 px-4">Payment Terms</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200 text-sm">
+                  {templates.map((tmpl) => (
+                    <tr key={tmpl.id} className="hover:bg-zinc-50/70">
+                      <td className="py-3.5 px-4">
+                        <div className="font-semibold text-zinc-900">
+                          {tmpl.name}
+                        </div>
+                        {tmpl.notes && (
+                          <div className="text-xs text-zinc-500">
+                            {tmpl.notes}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-zinc-800 font-medium">
+                        {tmpl.planName} ({tmpl.billingPeriod})
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-zinc-600">
+                        {(tmpl.lines || []).map((l) => (
+                          <div key={l.id}>
+                            {l.quantity} × {l.productName}
+                            {l.variantLabel ? ` (${l.variantLabel})` : ''}
+                          </div>
+                        ))}
+                      </td>
+                      <td className="py-3.5 px-4 text-xs text-zinc-700">
+                        Valid {tmpl.validityDays} days
+                      </td>
+                      <td className="py-3.5 px-4 text-xs font-medium text-zinc-700">
+                        {tmpl.paymentTerms}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      ) : section === 'discounts' ? (
+        discountRules.length === 0 ? (
+          <EmptyState
+            icon={Tag}
+            title="No discount rules configured"
+            description="Discount rules created by an administrator will appear here for staff reference."
+          />
+        ) : (
+          <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50/80 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                    <th className="py-3 px-4">Discount Rule</th>
+                    <th className="py-3 px-4">Benefit</th>
+                    <th className="py-3 px-4">Applies To</th>
+                    <th className="py-3 px-4">Minimums</th>
+                    <th className="py-3 px-4">Valid Dates</th>
+                    <th className="py-3 px-4">Usage</th>
+                    <th className="py-3 px-4">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200 text-sm">
+                  {discountRules.map((dr) => {
+                    const st = getDiscountRuleStatus(dr);
+                    return (
+                      <tr key={dr.id} className="hover:bg-zinc-50/70">
+                        <td className="py-3.5 px-4 font-semibold text-zinc-900">
+                          {dr.name}
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-xs font-bold text-zinc-900 tabular-nums">
+                          {dr.type === 'percentage'
+                            ? `${dr.value}% Off`
+                            : `${formatMoney(dr.value)} Off`}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-zinc-700">
+                          {dr.appliesTo === 'product'
+                            ? `Product: ${dr.productName}`
+                            : 'Whole Subscription'}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-zinc-600 tabular-nums">
+                          {Number(dr.minQuantity) > 0
+                            ? `Min ${dr.minQuantity} seats`
+                            : 'Any qty'}
+                          {Number(dr.minPurchase) > 0
+                            ? ` · Min ${formatMoney(dr.minPurchase)}`
+                            : ''}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-zinc-600 tabular-nums">
+                          {dr.startDate || dr.endDate ? (
+                            <>
+                              {dr.startDate ? formatDate(dr.startDate) : 'Any'} →{' '}
+                              {dr.endDate ? formatDate(dr.endDate) : 'No end'}
+                            </>
+                          ) : (
+                            'Always valid'
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs font-mono text-zinc-800 tabular-nums">
+                          {Number(dr.usedCount) || 0} /{' '}
+                          {dr.usageLimit ? dr.usageLimit : '∞'}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <Badge
+                            variant={st === 'active' ? 'success' : 'neutral'}
+                            size="sm"
+                          >
+                            {st === 'exhausted'
+                              ? 'Limit Reached'
+                              : st.charAt(0).toUpperCase() + st.slice(1)}
+                          </Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

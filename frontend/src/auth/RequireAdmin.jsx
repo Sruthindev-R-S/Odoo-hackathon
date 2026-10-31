@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Lock } from 'lucide-react';
 import Button from '../components/ui/Button';
@@ -8,7 +8,11 @@ export default function RequireAdmin({ children }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
-  if (user && user.role !== 'admin') {
+  if (!user) {
+    return <Navigate to="/signin" replace />;
+  }
+
+  if (user.role !== 'admin') {
     const destination = getHomePathForRole(user.role);
     const destinationLabel =
       user.role === 'staff' ? 'Staff Workspace' : 'Customer Portal';
@@ -29,7 +33,7 @@ export default function RequireAdmin({ children }) {
             You are signed in as{' '}
             <span className="font-semibold text-zinc-900">{user.email}</span> (
             <span className="capitalize font-medium text-zinc-800">{user.role}</span>).
-            Only administrators can manage products, plans, and staff permissions.
+            Only administrators control system configuration and can add new staff members.
           </p>
           <div className="flex flex-col sm:flex-row gap-2.5 justify-center">
             <Button variant="primary" onClick={() => navigate(destination)}>

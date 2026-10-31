@@ -1,7 +1,9 @@
 /**
  * Brightloop Authentication Service
- * 
+ *
  * Enforces:
+ * - Role-based identity (Admin, Staff, Customer)
+ * - Strictly Admin-only Staff creation ("Only the admin can add a new member of staff")
  * - Email uniqueness at service boundary
  * - Strict password complexity validation (>8 chars, uppercase, lowercase, special char)
  * - Single-use token-based password reset verification
@@ -11,12 +13,31 @@ const STORAGE_USERS_KEY = 'brightloop_users_v1';
 const STORAGE_CURRENT_USER_KEY = 'brightloop_current_user_v1';
 const STORAGE_RESET_TOKENS_KEY = 'brightloop_reset_tokens_v1';
 
+const BOOTSTRAP_ADMIN = {
+  id: 'user_admin_bootstrap',
+  name: 'System Administrator',
+  email: 'admin@brightloop.com',
+  password: 'Admin@1234',
+  role: 'admin',
+  organization: 'Brightloop',
+  isActive: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
 function getStoredUsers() {
   try {
     const raw = localStorage.getItem(STORAGE_USERS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(parsed) ? parsed : [];
+    const hasAdmin = list.some((u) => u && u.role === 'admin');
+    if (!hasAdmin) {
+      const seeded = [BOOTSTRAP_ADMIN, ...list];
+      localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(seeded));
+      return seeded;
+    }
+    return list;
   } catch {
-    return [];
+    return [BOOTSTRAP_ADMIN];
   }
 }
 
@@ -37,7 +58,7 @@ function saveStoredResetTokens(tokens) {
   localStorage.setItem(STORAGE_RESET_TOKENS_KEY, JSON.stringify(tokens));
 }
 
-const delay = (ms = 300) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms = 250) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Validate password requirements:
@@ -57,7 +78,7 @@ export function validatePasswordRules(password = '') {
     hasUppercase,
     hasLowercase,
     hasSpecial,
-    isValid: hasMinLength && hasUppercase && hasLowercase && hasSpecial
+    isValid: hasMinLength && hasUppercase && hasLowercase && hasSpecial,
   };
 }
 
@@ -76,13 +97,13 @@ export const authService = {
   },
 
   async signIn({ email, password }) {
-    await delay(350);
+    await delay(300);
 
     const cleanEmail = (email || '').trim().toLowerCase();
     if (!cleanEmail || !password) {
       return {
         success: false,
-        error: 'Please enter both email and password.'
+        error: 'Please enter both email and password.',
       };
     }
 
@@ -92,14 +113,14 @@ export const authService = {
     if (!user || user.password !== password) {
       return {
         success: false,
-        error: 'Invalid email or password. Please verify your credentials.'
+        error: 'Invalid email or password. Please verify your credentials.',
       };
     }
 
     if (user.isActive === false) {
       return {
         success: false,
-        error: 'This account has been deactivated by an administrator.'
+        error: 'This account has been deactivated by an administrator.',
       };
     }
 
@@ -109,13 +130,28 @@ export const authService = {
     return {
       success: true,
       user: safeUser,
-      token: `bl_tok_${Date.now()}_${safeUser.id}`
+      token: `bl_tok_${Date.now()}_${safeUser.id}`,
     };
   },
 
-  async signUp({ email, password, confirmPassword, name, organization }) {
-    await delay(450);
+  async signUp({
+    email,
+    password,
+    confirmPassword,
+    name,
+    organization,
+    role = 'customer',
+  }) {
+    await delay(350);
 
+    if (role === 'staff') {
+      return {
+        success: false,
+        error: 'Internal staff accounts can only be added by an Administrator.',
+      };
+    }
+
+    const assignedRole = role === 'admin' ? 'admin' : 'customer';
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanName = (name || '').trim();
     const cleanOrg = (organization || '').trim();
@@ -149,7 +185,7 @@ export const authService = {
       return {
         success: false,
         error: 'Please resolve the highlighted validation errors.',
-        fieldErrors
+        fieldErrors,
       };
     }
 
@@ -161,21 +197,28 @@ export const authService = {
         success: false,
         error: 'An account with this email address already exists.',
         fieldErrors: {
-          email: 'This email is already registered. Please sign in instead.'
-        }
+          email: 'This email is already registered. Please sign in instead.',
+        },
       };
     }
 
-    const newCustomerId = `cust_${cleanOrg.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'biz'}_${Date.now().toString().slice(-4)}`;
+    const newCustomerId =
+      assignedRole === 'customer'
+        ? `cust_${
+            cleanOrg.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'biz'
+          }_${Date.now().toString().slice(-4)}`
+        : undefined;
+
     const newUser = {
       id: `user_${Date.now()}`,
       name: cleanName,
       email: cleanEmail,
       password,
-      role: 'customer',
-      customerId: newCustomerId,
+      role: assignedRole,
+      ...(newCustomerId ? { customerId: newCustomerId } : {}),
+      isActive: true,
       organization: cleanOrg || `${cleanName}'s Business`,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     users.push(newUser);
@@ -187,18 +230,18 @@ export const authService = {
     return {
       success: true,
       user: safeUser,
-      token: `bl_tok_${Date.now()}_${safeUser.id}`
+      token: `bl_tok_${Date.now()}_${safeUser.id}`,
     };
   },
 
   async requestPasswordReset(email) {
-    await delay(350);
+    await delay(300);
 
     const cleanEmail = (email || '').trim().toLowerCase();
     if (!cleanEmail || !validateEmailFormat(cleanEmail)) {
       return {
         success: false,
-        error: 'Please provide a valid email address.'
+        error: 'Please provide a valid email address.',
       };
     }
 
@@ -207,31 +250,34 @@ export const authService = {
 
     if (user) {
       const tokens = getStoredResetTokens();
-      const resetToken = `rst_${Math.random().toString(36).substring(2, 10)}${Date.now()}`;
-      
+      const resetToken = `rst_${Math.random()
+        .toString(36)
+        .substring(2, 10)}${Date.now()}`;
+
       tokens.push({
         token: resetToken,
         userId: user.id,
         email: user.email,
         expiresAt: Date.now() + 15 * 60 * 1000,
-        used: false
+        used: false,
       });
       saveStoredResetTokens(tokens);
     }
 
     return {
       success: true,
-      message: 'If an account matches this email, instructions to reset your password have been sent.'
+      message:
+        'If an account matches this email, instructions to reset your password have been sent.',
     };
   },
 
   async validateResetToken(token) {
-    await delay(200);
+    await delay(180);
 
     if (!token) {
       return {
         valid: false,
-        error: 'Missing reset token.'
+        error: 'Missing reset token.',
       };
     }
 
@@ -241,38 +287,40 @@ export const authService = {
     if (!tokenRecord) {
       return {
         valid: false,
-        error: 'This password reset link is invalid or has expired.'
+        error: 'This password reset link is invalid or has expired.',
       };
     }
 
     if (tokenRecord.used) {
       return {
         valid: false,
-        error: 'This password reset link has already been used. Please request a new one.'
+        error:
+          'This password reset link has already been used. Please request a new one.',
       };
     }
 
     if (Date.now() > tokenRecord.expiresAt) {
       return {
         valid: false,
-        error: 'This password reset link has expired (links are valid for 15 minutes).'
+        error:
+          'This password reset link has expired (links are valid for 15 minutes).',
       };
     }
 
     return {
       valid: true,
-      email: tokenRecord.email
+      email: tokenRecord.email,
     };
   },
 
   async resetPassword({ token, newPassword, confirmPassword }) {
-    await delay(350);
+    await delay(300);
 
     const tokenCheck = await this.validateResetToken(token);
     if (!tokenCheck.valid) {
       return {
         success: false,
-        error: tokenCheck.error
+        error: tokenCheck.error,
       };
     }
 
@@ -280,24 +328,27 @@ export const authService = {
     if (!pwRules.isValid) {
       return {
         success: false,
-        error: 'The new password must be longer than 8 characters and include uppercase, lowercase, and special characters.'
+        error:
+          'The new password must be longer than 8 characters and include uppercase, lowercase, and special characters.',
       };
     }
 
     if (newPassword !== confirmPassword) {
       return {
         success: false,
-        error: 'Passwords do not match.'
+        error: 'Passwords do not match.',
       };
     }
 
     const users = getStoredUsers();
-    const userIndex = users.findIndex((u) => u.email.toLowerCase() === tokenCheck.email.toLowerCase());
+    const userIndex = users.findIndex(
+      (u) => u.email.toLowerCase() === tokenCheck.email.toLowerCase()
+    );
 
     if (userIndex === -1) {
       return {
         success: false,
-        error: 'User associated with this reset link was not found.'
+        error: 'User associated with this reset link was not found.',
       };
     }
 
@@ -313,7 +364,8 @@ export const authService = {
 
     return {
       success: true,
-      message: 'Your password has been successfully reset. You can now sign in with your new password.'
+      message:
+        'Your password has been successfully reset. You can now sign in with your new password.',
     };
   },
 
@@ -323,11 +375,11 @@ export const authService = {
   },
 
   async getStaffMembers(actorUser) {
-    await delay(100);
-    if (actorUser && actorUser.role !== 'admin') {
+    await delay(80);
+    if (!actorUser || actorUser.role !== 'admin') {
       return {
         success: false,
-        error: 'Only administrators are authorized to view staff accounts.'
+        error: 'Only administrators are authorized to view staff accounts.',
       };
     }
 
@@ -338,16 +390,16 @@ export const authService = {
 
     return {
       success: true,
-      data: staff
+      data: staff,
     };
   },
 
   async createStaffMember(actorUser, { name, email, title, password }) {
-    await delay(180);
-    if (actorUser && actorUser.role !== 'admin') {
+    await delay(140);
+    if (!actorUser || actorUser.role !== 'admin') {
       return {
         success: false,
-        error: 'Only administrators can create staff accounts.'
+        error: 'Only administrators can add a new member of staff.',
       };
     }
 
@@ -367,14 +419,15 @@ export const authService = {
     if (!password) {
       fieldErrors.password = 'Temporary password is required.';
     } else if (!pwRules.isValid) {
-      fieldErrors.password = 'Password must be over 8 characters with uppercase, lowercase, and special characters.';
+      fieldErrors.password =
+        'Password must be over 8 characters with uppercase, lowercase, and special characters.';
     }
 
     if (Object.keys(fieldErrors).length > 0) {
       return {
         success: false,
         error: 'Please check the highlighted fields.',
-        fieldErrors
+        fieldErrors,
       };
     }
 
@@ -384,8 +437,8 @@ export const authService = {
         success: false,
         error: 'An account with this email address already exists.',
         fieldErrors: {
-          email: 'This email is already registered.'
-        }
+          email: 'This email is already registered.',
+        },
       };
     }
 
@@ -398,7 +451,7 @@ export const authService = {
       title: cleanTitle,
       isActive: true,
       organization: actorUser?.organization || 'Brightloop',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     users.unshift(newStaff);
@@ -407,14 +460,14 @@ export const authService = {
     const { password: _pw, ...safeStaff } = newStaff;
     return {
       success: true,
-      data: safeStaff
+      data: safeStaff,
     };
   },
 
   async toggleStaffStatus(actorUser, staffId) {
-    await delay(100);
-    if (actorUser && actorUser.role !== 'admin') {
-      return { success: false, error: 'Unauthorized action.' };
+    await delay(80);
+    if (!actorUser || actorUser.role !== 'admin') {
+      return { success: false, error: 'Only administrators can modify staff accounts.' };
     }
 
     const users = getStoredUsers();
@@ -431,9 +484,9 @@ export const authService = {
   },
 
   async deleteStaffMember(actorUser, staffId) {
-    await delay(100);
-    if (actorUser && actorUser.role !== 'admin') {
-      return { success: false, error: 'Unauthorized action.' };
+    await delay(80);
+    if (!actorUser || actorUser.role !== 'admin') {
+      return { success: false, error: 'Only administrators can remove staff accounts.' };
     }
 
     const users = getStoredUsers();
@@ -443,34 +496,10 @@ export const authService = {
   },
 
   async getCustomers() {
-    await delay(80);
+    await delay(60);
     const users = getStoredUsers();
     return users
       .filter((u) => u.role === 'customer')
       .map(({ password: _pw, ...safeUser }) => safeUser);
   },
-
-  updateCurrentUserRole(newRole) {
-    if (!['admin', 'staff', 'customer'].includes(newRole)) {
-      return null;
-    }
-    const current = this.getCurrentUser();
-    if (!current) return null;
-
-    const updatedCurrent = {
-      ...current,
-      role: newRole,
-      customerId: current.customerId || `cust_${current.id}`
-    };
-    localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(updatedCurrent));
-
-    const users = getStoredUsers();
-    const idx = users.findIndex((u) => u.id === current.id || u.email.toLowerCase() === current.email.toLowerCase());
-    if (idx !== -1) {
-      users[idx] = { ...users[idx], role: newRole, customerId: updatedCurrent.customerId };
-      saveStoredUsers(users);
-    }
-
-    return updatedCurrent;
-  }
 };

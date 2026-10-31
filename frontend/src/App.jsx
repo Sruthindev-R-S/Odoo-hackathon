@@ -27,29 +27,22 @@ import CustomerPortal from './features/portal/CustomerPortal';
 
 function RootWorkspaceRouter() {
   const { user } = useAuth();
-  if (user?.role === 'staff') {
-    return <Navigate to="/staff" replace />;
+  if (!user) {
+    return <Navigate to="/signin" replace />;
   }
-  if (user?.role === 'customer') {
-    return <Navigate to="/portal" replace />;
-  }
-  return <AdminWorkspace initialTab="products" />;
+  return <Navigate to={getHomePathForRole(user.role)} replace />;
 }
 
 function DashboardRouter() {
   const { user } = useAuth();
-  if (user?.role === 'staff') {
-    return <StaffWorkspace initialTab="dashboard" />;
+  if (!user) {
+    return <Navigate to="/signin" replace />;
   }
-  return (
-    <RequireAdmin>
-      <AdminWorkspace initialTab="dashboard" />
-    </RequireAdmin>
-  );
+  return <Navigate to={getHomePathForRole(user.role)} replace />;
 }
 
 function AccountOverview() {
-  const { user, signOut, switchRole } = useAuth();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
 
   if (!user) {
@@ -64,12 +57,8 @@ function AccountOverview() {
       ? 'Open Staff Workspace'
       : 'Open Customer Portal';
 
-  const handleRoleSwitch = (nextRole) => {
-    const updated = switchRole(nextRole);
-    if (updated) {
-      navigate(getHomePathForRole(nextRole));
-    }
-  };
+  const canAccessBillingCheckout =
+    user.role === 'customer' || user.role === 'admin';
 
   return (
     <div className="min-h-screen flex flex-col bg-[#fafafa] font-sans text-zinc-900">
@@ -83,12 +72,14 @@ function AccountOverview() {
             >
               {homeLabel}
             </Link>
-            <Link
-              to="/billing"
-              className="text-xs font-medium text-zinc-700 hover:text-zinc-900 no-underline"
-            >
-              Customer Billing & Checkout
-            </Link>
+            {canAccessBillingCheckout && (
+              <Link
+                to="/portal/billing"
+                className="text-xs font-medium text-zinc-700 hover:text-zinc-900 no-underline"
+              >
+                Billing & Checkout
+              </Link>
+            )}
           </nav>
         </div>
         <div className="flex items-center gap-3">
@@ -146,9 +137,9 @@ function AccountOverview() {
               <div className="text-xs text-zinc-400 mb-0.5">Role Scope</div>
               <div className="text-xs text-zinc-600 leading-relaxed">
                 {user.role === 'admin' &&
-                  'Administrator: Full system access including products, variants, subscription plans, billing, and staff management.'}
+                  'Administrator: Full system control across products, variants, subscription plans, quotation templates, discount rules, tax rules, subscriptions, billing, and staff provisioning.'}
                 {user.role === 'staff' &&
-                  'Staff: Operational access to customer subscriptions, quotations, invoices, payments, and read-only catalog.'}
+                  'Internal Staff: Day-to-day operational access to quotations, customer subscriptions, billing runs, invoices, and read-only catalog.'}
                 {user.role === 'customer' &&
                   'Customer: Self-service portal scoped exclusively to your own subscriptions and invoices.'}
               </div>
@@ -162,43 +153,14 @@ function AccountOverview() {
             >
               {homeLabel}
             </Link>
-            <Link
-              to="/billing"
-              className="flex-1 text-center px-4 py-2 rounded-lg text-sm font-medium bg-white text-zinc-800 border border-zinc-200 hover:bg-zinc-50 no-underline transition-colors"
-            >
-              Plan Checkout
-            </Link>
-          </div>
-        </div>
-
-        {/* Workspace Role Switcher for Testing All 3 Dashboards */}
-        <div className="bg-white border border-zinc-200 rounded-xl p-5 shadow-2xs space-y-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-              Switch Role View
-            </div>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              Switch your active session role to preview Admin, Staff, or Customer dashboards.
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {['admin', 'staff', 'customer'].map((roleOpt) => {
-              const active = user.role === roleOpt;
-              return (
-                <button
-                  key={roleOpt}
-                  type="button"
-                  onClick={() => handleRoleSwitch(roleOpt)}
-                  className={`py-2 px-3 rounded-lg text-xs font-medium capitalize border transition-colors ${
-                    active
-                      ? 'bg-zinc-900 text-white border-zinc-900'
-                      : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50 hover:text-zinc-900'
-                  }`}
-                >
-                  {roleOpt}
-                </button>
-              );
-            })}
+            {canAccessBillingCheckout && (
+              <Link
+                to="/portal/billing"
+                className="flex-1 text-center px-4 py-2 rounded-lg text-sm font-medium bg-white text-zinc-800 border border-zinc-200 hover:bg-zinc-50 no-underline transition-colors"
+              >
+                Plan Checkout
+              </Link>
+            )}
           </div>
         </div>
       </main>
@@ -262,6 +224,22 @@ export default function App() {
               }
             />
             <Route
+              path="/templates"
+              element={
+                <RequireAdmin>
+                  <AdminWorkspace initialTab="templates" />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/discounts"
+              element={
+                <RequireAdmin>
+                  <AdminWorkspace initialTab="discounts" />
+                </RequireAdmin>
+              }
+            />
+            <Route
               path="/settings/products"
               element={
                 <RequireAdmin>
@@ -274,6 +252,22 @@ export default function App() {
               element={
                 <RequireAdmin>
                   <AdminWorkspace initialTab="plans" />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/settings/templates"
+              element={
+                <RequireAdmin>
+                  <AdminWorkspace initialTab="templates" />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/settings/discounts"
+              element={
+                <RequireAdmin>
+                  <AdminWorkspace initialTab="discounts" />
                 </RequireAdmin>
               }
             />
@@ -295,18 +289,60 @@ export default function App() {
             />
 
             {/* Customer Plan Selection & Recurring Billing Checkout */}
-            <Route path="/billing" element={<CustomerBillingPage />} />
-            <Route path="/portal/billing" element={<CustomerBillingPage />} />
-            <Route path="/portal/subscriptions/new" element={<CustomerBillingPage />} />
-            <Route path="/checkout" element={<CustomerBillingPage />} />
-            <Route path="/billing-runs" element={<BillingRunsPage />} />
-            <Route path="/invoices" element={<InvoicesPage />} />
+            <Route
+              path="/billing"
+              element={
+                <RequireRole allowedRoles={['customer', 'admin']}>
+                  <CustomerBillingPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/portal/billing"
+              element={
+                <RequireRole allowedRoles={['customer', 'admin']}>
+                  <CustomerBillingPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/portal/subscriptions/new"
+              element={
+                <RequireRole allowedRoles={['customer', 'admin']}>
+                  <CustomerBillingPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/checkout"
+              element={
+                <RequireRole allowedRoles={['customer', 'admin']}>
+                  <CustomerBillingPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/billing-runs"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']}>
+                  <BillingRunsPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/invoices"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']}>
+                  <InvoicesPage />
+                </RequireRole>
+              }
+            />
 
-            {/* Staff Operations Dashboard */}
+            {/* Staff Operations Workspace */}
             <Route
               path="/staff"
               element={
-                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
+                <RequireRole allowedRoles={['staff', 'admin']}>
                   <StaffWorkspace initialTab="dashboard" />
                 </RequireRole>
               }
@@ -316,7 +352,7 @@ export default function App() {
             <Route
               path="/portal"
               element={
-                <RequireRole allowedRoles={['customer']} allowUnauthenticated>
+                <RequireRole allowedRoles={['customer']}>
                   <CustomerPortal />
                 </RequireRole>
               }

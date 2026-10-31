@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '../../components/layout/AuthLayout';
 import { Input } from '../../components/common/Input';
 import { useAuth } from '../../context/AuthContext';
+import { getHomePathForRole } from '../../auth/RequireRole';
 
 export function SignInPage() {
-  const { signIn } = useAuth();
+  const { user, signIn } = useAuth();
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
     email: '',
-    password: ''
+    password: '',
   });
 
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (user) {
+    return <Navigate to={getHomePathForRole(user.role)} replace />;
+  }
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -39,14 +44,7 @@ export function SignInPage() {
     try {
       const result = await signIn(formData);
       if (result.success) {
-        const role = result.user?.role;
-        if (role === 'admin') {
-          navigate('/admin', { replace: true });
-        } else if (role === 'staff') {
-          navigate('/staff', { replace: true });
-        } else {
-          navigate('/portal', { replace: true });
-        }
+        navigate(getHomePathForRole(result.user?.role), { replace: true });
       } else {
         setError(result.error || 'Invalid credentials.');
       }
@@ -60,7 +58,7 @@ export function SignInPage() {
   return (
     <AuthLayout
       title="Sign in to Brightloop"
-      subtitle="Welcome back. Enter your credentials to continue."
+      subtitle="Enter your credentials to access your role workspace."
     >
       {error && (
         <div className="bl-alert bl-alert-danger" role="alert">
@@ -96,7 +94,12 @@ export function SignInPage() {
           labelRightAction={
             <Link
               to="/forgot-password"
-              style={{ fontSize: 13, fontWeight: 500, color: 'var(--bl-text-secondary)', textDecoration: 'none' }}
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: 'var(--bl-text-secondary)',
+                textDecoration: 'none',
+              }}
             >
               Forgot password?
             </Link>

@@ -575,6 +575,10 @@ export default function CustomerPortal() {
             ) : (
               subscriptions.map((sub) => {
                 const busy = actionLoadingId === sub.id;
+                const totalWithTax =
+                  sub.totalWithTax !== undefined
+                    ? sub.totalWithTax
+                    : sub.recurringAmount;
                 return (
                   <Card
                     key={sub.id}
@@ -594,36 +598,40 @@ export default function CustomerPortal() {
                             isPaused={sub.isPaused}
                           />
                         </div>
-                        <p className="text-xs text-zinc-600">
-                          {sub.quantity} × {sub.productName}
-                          {sub.variantLabel && (
-                            <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded bg-zinc-100 border border-zinc-200 text-zinc-800">
-                              {sub.variantLabel}
-                              {sub.variantExtraPrice > 0 && (
-                                <span className="ml-1 text-orange-700 font-semibold">
-                                  +₹{sub.variantExtraPrice}
-                                </span>
-                              )}
-                            </span>
-                          )}
+                        <p className="text-xs text-zinc-500">
+                          Payment Terms: <span className="font-medium text-zinc-800">{sub.paymentTerms || 'Due on receipt'}</span>
                         </p>
                       </div>
 
                       <div className="sm:text-right">
                         <div className="text-lg font-bold text-zinc-900 tabular-nums">
-                          {formatMoney(sub.recurringAmount)}
+                          {formatMoney(totalWithTax)}
                         </div>
+                        {sub.discountAmount > 0 && (
+                          <div className="text-xs font-medium text-emerald-700">
+                            Includes -{formatMoney(sub.discountAmount)} discount
+                          </div>
+                        )}
                         <div className="text-xs text-zinc-500 capitalize">
-                          billed {sub.billingPeriod}
+                          per {sub.billingPeriod}
+                          {sub.taxAmount > 0
+                            ? ` (incl. ${formatMoney(sub.taxAmount)} tax)`
+                            : ''}
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 py-3 border-y border-zinc-100 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-3 border-y border-zinc-100 text-xs">
                       <div>
-                        <span className="text-zinc-400">Started</span>
+                        <span className="text-zinc-400">Start Date</span>
                         <div className="font-medium text-zinc-800 mt-0.5 tabular-nums">
                           {formatDate(sub.startDate)}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-zinc-400">Expiry Date</span>
+                        <div className="font-medium text-zinc-800 mt-0.5 tabular-nums">
+                          {formatDate(sub.expiryDate)}
                         </div>
                       </div>
                       <div>
@@ -638,11 +646,56 @@ export default function CustomerPortal() {
                         <span className="text-zinc-400">End Policy</span>
                         <div className="font-medium text-zinc-800 mt-0.5">
                           {sub.planRules?.autoCloseOnEnd
-                            ? 'Closes automatically at end'
+                            ? 'Auto-closes at end'
                             : 'Continues until closed'}
                         </div>
                       </div>
                     </div>
+
+                    {/* Product Lines Summary Table */}
+                    {Array.isArray(sub.lineItems) && sub.lineItems.length > 0 && (
+                      <div className="border border-zinc-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-zinc-50 border-b border-zinc-200 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              <th className="py-2 px-3">Product</th>
+                              <th className="py-2 px-2 text-right">Qty</th>
+                              <th className="py-2 px-2 text-right">Unit Price</th>
+                              <th className="py-2 px-2 text-right">Taxes</th>
+                              <th className="py-2 px-3 text-right">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-200">
+                            {sub.lineItems.map((line) => (
+                              <tr key={line.id}>
+                                <td className="py-2 px-3">
+                                  <span className="font-medium text-zinc-900">
+                                    {line.productName || line.name}
+                                  </span>
+                                  {line.variant && (
+                                    <span className="ml-1.5 text-zinc-500">
+                                      ({line.variant})
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-2 text-right tabular-nums text-zinc-700">
+                                  {line.quantity}
+                                </td>
+                                <td className="py-2 px-2 text-right tabular-nums text-zinc-700">
+                                  {formatMoney(line.unitPrice)}
+                                </td>
+                                <td className="py-2 px-2 text-right tabular-nums text-zinc-600">
+                                  {formatMoney(line.taxAmount || 0)}
+                                </td>
+                                <td className="py-2 px-3 text-right font-semibold tabular-nums text-zinc-900">
+                                  {formatMoney(line.amount)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
 
                     {/* Self-Service Controls governed by Plan's 4 Switches */}
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1132,6 +1185,27 @@ export default function CustomerPortal() {
                 </tbody>
               </table>
               <div className="bg-zinc-50 border-t border-zinc-200 p-3.5 space-y-1.5">
+                {viewingInvoice.discountAmount > 0 && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-zinc-500">Gross Amount</span>
+                      <span className="font-medium text-zinc-900 tabular-nums">
+                        {formatMoney(viewingInvoice.grossSubtotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-emerald-700 font-medium">
+                      <span>
+                        Discount (
+                        {viewingInvoice.discountLabel ||
+                          viewingInvoice.discountName}
+                        )
+                      </span>
+                      <span className="tabular-nums">
+                        -{formatMoney(viewingInvoice.discountAmount)}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between">
                   <span className="text-zinc-500">Subtotal</span>
                   <span className="font-medium text-zinc-900 tabular-nums">
