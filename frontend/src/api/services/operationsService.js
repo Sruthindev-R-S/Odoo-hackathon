@@ -164,9 +164,11 @@ function normalizeSubscription(raw) {
   });
 
   const preferredDiscountRuleId = raw.preferredDiscountRuleId || '';
+  const appliedDiscountRuleId = raw.appliedDiscountRuleId || '';
   const discCalc = evaluateApplicableDiscount(lineItems, {
     evalDate: new Date().toISOString().slice(0, 10),
     preferredRuleId: preferredDiscountRuleId,
+    appliedRuleId: appliedDiscountRuleId,
   });
 
   const taxableLines = discCalc.discountedLines.map((dl) => ({
@@ -197,6 +199,7 @@ function normalizeSubscription(raw) {
         ? Number(raw.validityDays)
         : null,
     preferredDiscountRuleId,
+    appliedDiscountRuleId,
     customerName: raw.customerName || 'Customer',
     customerEmail: raw.customerEmail || '',
     customerOrganization: raw.customerOrganization || raw.organization || '',
@@ -562,6 +565,7 @@ function buildInvoiceFromSubscription(
   const discCalc = evaluateApplicableDiscount(lines, {
     evalDate: today,
     preferredRuleId: sub.preferredDiscountRuleId || '',
+    appliedRuleId: sub.appliedDiscountRuleId || '',
   });
 
   const taxableLines = discCalc.discountedLines.map((dl) => ({
@@ -825,10 +829,8 @@ export const operationsService = {
     actorUser
   ) {
     await new Promise((r) => setTimeout(r, 70));
-    if (!actorUser || (actorUser.role !== 'admin' && actorUser.role !== 'staff')) {
-      throw new Error(
-        'Only internal staff or administrators can update subscription pricing or seats.'
-      );
+    if (!actorUser) {
+      throw new Error('Authentication required.');
     }
 
     const all = readUnifiedSubscriptions();
@@ -838,6 +840,12 @@ export const operationsService = {
     }
 
     const existing = all[idx];
+    if (
+      actorUser.role === 'customer' &&
+      !belongsToCustomer(existing, actorUser)
+    ) {
+      throw new Error('You do not have permission to modify this subscription.');
+    }
     if (existing.status === 'closed') {
       throw new Error('Closed subscriptions cannot be modified.');
     }
@@ -845,15 +853,19 @@ export const operationsService = {
     const nextLines =
       Array.isArray(lines) && lines.length > 0
         ? lines.map((line, lIdx) => {
+            const origLine = existing.lineItems?.[lIdx] || {};
             const qty = Math.max(1, Number(line.quantity) || 1);
-            const uPrice = Math.max(0, Number(line.unitPrice) || 0);
+            const uPrice =
+              actorUser.role === 'customer'
+                ? Math.max(0, Number(origLine.unitPrice ?? line.unitPrice) || 0)
+                : Math.max(0, Number(line.unitPrice) || 0);
             const pName = line.productName || line.name || 'Product';
             const vLabel = line.variantLabel ?? line.variant ?? '';
             const desc = vLabel ? `${pName} (${vLabel})` : pName;
             return {
               ...line,
               id: line.id || `line_${Date.now()}_${lIdx}`,
-              productId: line.productId || '',
+              productId: line.productId || origLine.productId || '',
               productName: pName,
               name: pName,
               description: desc,
@@ -868,13 +880,16 @@ export const operationsService = {
     const leadLine = nextLines[0] || existing.lineItems?.[0];
     const nowIso = new Date().toISOString();
     const nextRulePref =
-      preferredDiscountRuleId !== undefined
+      actorUser.role === 'customer'
+        ? existing.preferredDiscountRuleId || ''
+        : preferredDiscountRuleId !== undefined
         ? preferredDiscountRuleId
         : existing.preferredDiscountRuleId || '';
 
     const normalized = normalizeSubscription({
       ...existing,
       preferredDiscountRuleId: nextRulePref,
+      appliedDiscountRuleId: '',
       quantity: Number(leadLine?.quantity ?? existing.quantity) || 1,
       unitPrice: Number(leadLine?.unitPrice ?? existing.unitPrice) || 0,
       lineItems: nextLines,
@@ -1092,6 +1107,14 @@ export const operationsService = {
       options.billingDate || null
     );
 
+    if (newInvoice.discountRuleId && !sub.appliedDiscountRuleId) {
+      subs[subIdx] = {
+        ...sub,
+        appliedDiscountRuleId: newInvoice.discountRuleId,
+      };
+      saveUnifiedSubscriptions(subs);
+    }
+
     invoices.unshift(newInvoice);
     saveUnifiedInvoices(invoices, subs);
     return newInvoice;
@@ -1150,6 +1173,8 @@ export const operationsService = {
     const eligible = subs.filter((s) => s.status === 'active' && !s.isPaused);
     let createdCount = 0;
     let skippedCount = 0;
+    let discountedCount = 0;
+    let subsDiscountLocked = false;
 
     eligible.forEach((sub) => {
       const cycleKey = `${sub.id}_${sub.nextBillingDate}`;
@@ -1170,10 +1195,26 @@ export const operationsService = {
         productsById,
         today
       );
+      if (draftInv.discountAmount > 0) {
+        discountedCount += 1;
+        if (draftInv.discountRuleId && !sub.appliedDiscountRuleId) {
+          const sIdx = subs.findIndex((s) => s.id === sub.id);
+          if (sIdx !== -1) {
+            subs[sIdx] = {
+              ...subs[sIdx],
+              appliedDiscountRuleId: draftInv.discountRuleId,
+            };
+            subsDiscountLocked = true;
+          }
+        }
+      }
       invoices.unshift(draftInv);
       createdCount += 1;
     });
 
+    if (subsDiscountLocked) {
+      saveUnifiedSubscriptions(subs);
+    }
     saveUnifiedInvoices(invoices, subs);
 
     const activeRules = taxService
@@ -1194,6 +1235,7 @@ export const operationsService = {
       eligibleCount: eligible.length,
       createdCount,
       skippedCount,
+      discountedCount,
       failedCount: 0,
       created: createdCount,
       skipped: skippedCount,

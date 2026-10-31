@@ -7,7 +7,7 @@
  * - Minimum seat/item quantity and/or minimum purchase amount thresholds
  * - Start date and End date validity window (automatically stops when expired)
  * - Usage limit counter across generated invoices (automatically stops when limit is reached)
- * - Scope targeting either specific products or whole subscriptions
+ * - Scope targeting either specific products (one or multiple) or whole subscriptions
  */
 
 const STORAGE_KEY = 'brightloop_discount_rules_v1';
@@ -20,6 +20,7 @@ const SEED_DISCOUNT_RULES = [
     value: 10,
     appliesTo: 'product',
     productId: 'prod_core_01',
+    productIds: ['prod_core_01'],
     productName: 'Brightloop Core Recurring Engine',
     minQuantity: 10,
     minPurchase: 0,
@@ -38,6 +39,7 @@ const SEED_DISCOUNT_RULES = [
     value: 2500,
     appliesTo: 'subscription',
     productId: '',
+    productIds: [],
     productName: 'Whole Subscription',
     minQuantity: 1,
     minPurchase: 25000,
@@ -51,25 +53,47 @@ const SEED_DISCOUNT_RULES = [
   },
 ];
 
+function normalizeRuleRecord(rule) {
+  if (!rule) return rule;
+  const appliesTo = rule.appliesTo === 'product' ? 'product' : 'subscription';
+  const productIds =
+    appliesTo === 'product'
+      ? Array.isArray(rule.productIds) && rule.productIds.length > 0
+        ? rule.productIds.filter(Boolean)
+        : rule.productId
+        ? [rule.productId]
+        : []
+      : [];
+  return {
+    ...rule,
+    appliesTo,
+    productId: productIds[0] || '',
+    productIds,
+  };
+}
+
 function getStoredDiscountRules() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_DISCOUNT_RULES));
-      return SEED_DISCOUNT_RULES.map((r) => ({ ...r }));
+      return SEED_DISCOUNT_RULES.map((r) => normalizeRuleRecord({ ...r }));
     }
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? parsed
-      : SEED_DISCOUNT_RULES.map((r) => ({ ...r }));
+      ? parsed.map(normalizeRuleRecord)
+      : SEED_DISCOUNT_RULES.map((r) => normalizeRuleRecord({ ...r }));
   } catch {
-    return SEED_DISCOUNT_RULES.map((r) => ({ ...r }));
+    return SEED_DISCOUNT_RULES.map((r) => normalizeRuleRecord({ ...r }));
   }
 }
 
 function saveStoredDiscountRules(rules) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rules));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(rules.map(normalizeRuleRecord))
+    );
   } catch (err) {
     console.error('Failed to persist discount rules', err);
   }
@@ -103,7 +127,44 @@ export function getDiscountRuleStatus(rule, evalDateStr = null) {
   return 'active';
 }
 
-function computeRuleDiscountForLines(rule, lines = []) {
+function distributeDiscountAcrossLines(lines, eligiblePredicate, baseSubtotal, discountAmount) {
+  const eligibleIndices = [];
+  lines.forEach((line, idx) => {
+    if (eligiblePredicate(line) && (Number(line.amount) || 0) > 0) {
+      eligibleIndices.push(idx);
+    }
+  });
+
+  let allocated = 0;
+  const lastEligibleIdx =
+    eligibleIndices.length > 0
+      ? eligibleIndices[eligibleIndices.length - 1]
+      : -1;
+
+  return lines.map((line, idx) => {
+    const lineAmt = Math.round((Number(line.amount) || 0) * 100) / 100;
+    if (!eligibleIndices.includes(idx) || baseSubtotal <= 0) {
+      return { ...line, discountShare: 0, netAmount: lineAmt };
+    }
+
+    let share =
+      idx === lastEligibleIdx
+        ? Math.round((discountAmount - allocated) * 100) / 100
+        : Math.round((lineAmt / baseSubtotal) * discountAmount * 100) / 100;
+
+    share = Math.max(0, Math.min(lineAmt, share));
+    allocated = Math.round((allocated + share) * 100) / 100;
+
+    return {
+      ...line,
+      discountShare: share,
+      netAmount: Math.max(0, Math.round((lineAmt - share) * 100) / 100),
+    };
+  });
+}
+
+function computeRuleDiscountForLines(rawRule, lines = []) {
+  const rule = normalizeRuleRecord(rawRule);
   const grossSubtotal =
     Math.round(
       lines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0) * 100
@@ -116,8 +177,11 @@ function computeRuleDiscountForLines(rule, lines = []) {
   if (val <= 0) return null;
 
   if (rule.appliesTo === 'product') {
-    if (!rule.productId) return null;
-    const matchingLines = lines.filter((l) => l.productId === rule.productId);
+    const targetIds = rule.productIds || [];
+    if (targetIds.length === 0) return null;
+
+    const isTargetLine = (l) => Boolean(l.productId && targetIds.includes(l.productId));
+    const matchingLines = lines.filter(isTargetLine);
     if (matchingLines.length === 0) return null;
 
     const matchingQty = matchingLines.reduce(
@@ -141,20 +205,12 @@ function computeRuleDiscountForLines(rule, lines = []) {
       Math.round(Math.min(matchingSubtotal, rawDiscount) * 100) / 100;
     if (discountAmount <= 0) return null;
 
-    // Distribute product discount proportionally across matching product lines for accurate tax calculation
-    const discountedLines = lines.map((line) => {
-      const lineAmt = Number(line.amount) || 0;
-      if (line.productId !== rule.productId || matchingSubtotal <= 0) {
-        return { ...line, discountShare: 0, netAmount: lineAmt };
-      }
-      const share =
-        Math.round((lineAmt / matchingSubtotal) * discountAmount * 100) / 100;
-      return {
-        ...line,
-        discountShare: share,
-        netAmount: Math.max(0, Math.round((lineAmt - share) * 100) / 100),
-      };
-    });
+    const discountedLines = distributeDiscountAcrossLines(
+      lines,
+      isTargetLine,
+      matchingSubtotal,
+      discountAmount
+    );
 
     return {
       rule,
@@ -180,18 +236,12 @@ function computeRuleDiscountForLines(rule, lines = []) {
     Math.round(Math.min(grossSubtotal, rawDiscount) * 100) / 100;
   if (discountAmount <= 0) return null;
 
-  const discountedLines = lines.map((line) => {
-    const lineAmt = Number(line.amount) || 0;
-    const share =
-      grossSubtotal > 0
-        ? Math.round((lineAmt / grossSubtotal) * discountAmount * 100) / 100
-        : 0;
-    return {
-      ...line,
-      discountShare: share,
-      netAmount: Math.max(0, Math.round((lineAmt - share) * 100) / 100),
-    };
-  });
+  const discountedLines = distributeDiscountAcrossLines(
+    lines,
+    () => true,
+    grossSubtotal,
+    discountAmount
+  );
 
   return {
     rule,
@@ -200,8 +250,33 @@ function computeRuleDiscountForLines(rule, lines = []) {
   };
 }
 
+function buildAppliedResult(chosen, match, grossSubtotal) {
+  const netSubtotal = Math.max(
+    0,
+    Math.round((grossSubtotal - match.discountAmount) * 100) / 100
+  );
+  const badge =
+    chosen.type === 'percentage'
+      ? `${chosen.value}% off`
+      : `₹${chosen.value} off`;
+
+  return {
+    rule: chosen,
+    discountRuleId: chosen.id,
+    discountName: chosen.name,
+    discountLabel: `${chosen.name} (${badge})`,
+    discountType: chosen.type,
+    discountValue: chosen.value,
+    grossSubtotal,
+    discountAmount: match.discountAmount,
+    netSubtotal,
+    stoppedReason: '',
+    discountedLines: match.discountedLines,
+  };
+}
+
 /**
- * Synchronous discount evaluation engine used by Quotations, Subscriptions, and Billing Day runs.
+ * Synchronous discount evaluation engine used by Quotations, Subscriptions, Checkout, and Billing Day runs.
  * Automatically checks start/end dates, remaining usage limit, seat/purchase thresholds, and product/subscription scope.
  * Stops automatically when a rule expires or reaches its usage limit.
  */
@@ -210,11 +285,12 @@ export function evaluateApplicableDiscount(
   context = {},
   explicitRules = null
 ) {
-  const rules = Array.isArray(explicitRules)
-    ? explicitRules
-    : getStoredDiscountRules();
+  const rules = (
+    Array.isArray(explicitRules) ? explicitRules : getStoredDiscountRules()
+  ).map(normalizeRuleRecord);
   const evalDate = context.evalDate || new Date().toISOString().slice(0, 10);
   const preferredRuleId = context.preferredRuleId || '';
+  const appliedRuleId = context.appliedRuleId || '';
 
   const grossSubtotal =
     Math.round(
@@ -247,12 +323,22 @@ export function evaluateApplicableDiscount(
     return noDiscountResult();
   }
 
-  // If a specific rule was attached to the subscription, check it first; stop cleanly if expired or exhausted
-  if (preferredRuleId && preferredRuleId !== 'auto') {
-    const pinned = rules.find((r) => r.id === preferredRuleId);
+  // 1. Explicit rule pinned on the subscription
+  const lockedId =
+    preferredRuleId && preferredRuleId !== 'auto'
+      ? preferredRuleId
+      : appliedRuleId || '';
+
+  if (lockedId) {
+    const pinned = rules.find((r) => r.id === lockedId);
     if (!pinned) {
-      return noDiscountResult('Discount rule removed');
+      if (preferredRuleId && preferredRuleId !== 'auto') {
+        return noDiscountResult('Discount rule removed');
+      }
+      // If an auto-applied rule was deleted by Admin, stop cleanly
+      return noDiscountResult('Previous discount rule removed');
     }
+
     const status = getDiscountRuleStatus(pinned, evalDate);
     if (status === 'expired') {
       return noDiscountResult(`"${pinned.name}" expired on ${pinned.endDate}`);
@@ -273,31 +359,10 @@ export function evaluateApplicableDiscount(
       );
     }
 
-    const netSubtotal = Math.max(
-      0,
-      Math.round((grossSubtotal - match.discountAmount) * 100) / 100
-    );
-    const badge =
-      pinned.type === 'percentage'
-        ? `${pinned.value}% off`
-        : `₹${pinned.value} off`;
-
-    return {
-      rule: pinned,
-      discountRuleId: pinned.id,
-      discountName: pinned.name,
-      discountLabel: `${pinned.name} (${badge})`,
-      discountType: pinned.type,
-      discountValue: pinned.value,
-      grossSubtotal,
-      discountAmount: match.discountAmount,
-      netSubtotal,
-      stoppedReason: '',
-      discountedLines: match.discountedLines,
-    };
+    return buildAppliedResult(pinned, match, grossSubtotal);
   }
 
-  // Automatic mode: evaluate all active, un-expired, un-exhausted rules and pick the highest saving rule
+  // 2. Automatic discovery mode: evaluate all active, un-expired, un-exhausted rules and pick highest saving rule
   let bestMatch = null;
   rules.forEach((rule) => {
     if (getDiscountRuleStatus(rule, evalDate) !== 'active') return;
@@ -314,29 +379,7 @@ export function evaluateApplicableDiscount(
     return noDiscountResult();
   }
 
-  const chosen = bestMatch.rule;
-  const netSubtotal = Math.max(
-    0,
-    Math.round((grossSubtotal - bestMatch.discountAmount) * 100) / 100
-  );
-  const badge =
-    chosen.type === 'percentage'
-      ? `${chosen.value}% off`
-      : `₹${chosen.value} off`;
-
-  return {
-    rule: chosen,
-    discountRuleId: chosen.id,
-    discountName: chosen.name,
-    discountLabel: `${chosen.name} (${badge})`,
-    discountType: chosen.type,
-    discountValue: chosen.value,
-    grossSubtotal,
-    discountAmount: bestMatch.discountAmount,
-    netSubtotal,
-    stoppedReason: '',
-    discountedLines: bestMatch.discountedLines,
-  };
+  return buildAppliedResult(bestMatch.rule, bestMatch, grossSubtotal);
 }
 
 export function consumeDiscountRuleUsage(ruleId) {
@@ -396,8 +439,17 @@ export const discountService = {
     }
 
     const appliesTo = payload.appliesTo === 'product' ? 'product' : 'subscription';
-    if (appliesTo === 'product' && !payload.productId) {
-      throw new Error('Select a target product for product-specific discounts.');
+    const productIds =
+      appliesTo === 'product'
+        ? Array.isArray(payload.productIds) && payload.productIds.length > 0
+          ? payload.productIds.filter(Boolean)
+          : payload.productId
+          ? [payload.productId]
+          : []
+        : [];
+
+    if (appliesTo === 'product' && productIds.length === 0) {
+      throw new Error('Select at least one target product for product-specific discounts.');
     }
 
     if (
@@ -412,6 +464,7 @@ export const discountService = {
     const minPurchase = Math.max(0, Number(payload.minPurchase) || 0);
     const usageLimit =
       payload.usageLimit !== undefined &&
+      payload.usageLimit !== null &&
       payload.usageLimit !== '' &&
       Number(payload.usageLimit) > 0
         ? Math.floor(Number(payload.usageLimit))
@@ -419,16 +472,17 @@ export const discountService = {
 
     const rules = getStoredDiscountRules();
     const now = new Date().toISOString();
-    const created = {
+    const created = normalizeRuleRecord({
       id: `disc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name,
       type,
       value: Math.round(value * 100) / 100,
       appliesTo,
-      productId: appliesTo === 'product' ? payload.productId : '',
+      productId: productIds[0] || '',
+      productIds,
       productName:
         appliesTo === 'product'
-          ? payload.productName || 'Specific Product'
+          ? payload.productName || 'Specific Products'
           : 'Whole Subscription',
       minQuantity,
       minPurchase,
@@ -439,7 +493,7 @@ export const discountService = {
       isActive: payload.isActive !== false,
       createdAt: now,
       updatedAt: now,
-    };
+    });
 
     rules.unshift(created);
     saveStoredDiscountRules(rules);
@@ -475,12 +529,18 @@ export const discountService = {
       (payload.appliesTo || rules[idx].appliesTo) === 'product'
         ? 'product'
         : 'subscription';
-    const productId =
+
+    const productIds =
       appliesTo === 'product'
-        ? payload.productId ?? rules[idx].productId
-        : '';
-    if (appliesTo === 'product' && !productId) {
-      throw new Error('Select a target product for product-specific discounts.');
+        ? Array.isArray(payload.productIds)
+          ? payload.productIds.filter(Boolean)
+          : payload.productId
+          ? [payload.productId]
+          : rules[idx].productIds || []
+        : [];
+
+    if (appliesTo === 'product' && productIds.length === 0) {
+      throw new Error('Select at least one target product for product-specific discounts.');
     }
 
     const startDate =
@@ -493,21 +553,24 @@ export const discountService = {
 
     const usageLimit =
       payload.usageLimit !== undefined
-        ? payload.usageLimit !== '' && Number(payload.usageLimit) > 0
+        ? payload.usageLimit !== null &&
+          payload.usageLimit !== '' &&
+          Number(payload.usageLimit) > 0
           ? Math.floor(Number(payload.usageLimit))
           : null
         : rules[idx].usageLimit;
 
-    const updated = {
+    const updated = normalizeRuleRecord({
       ...rules[idx],
       name,
       type,
       value: Math.round(value * 100) / 100,
       appliesTo,
-      productId,
+      productId: productIds[0] || '',
+      productIds,
       productName:
         appliesTo === 'product'
-          ? payload.productName || rules[idx].productName || 'Specific Product'
+          ? payload.productName || rules[idx].productName || 'Specific Products'
           : 'Whole Subscription',
       minQuantity: Math.max(
         0,
@@ -525,7 +588,7 @@ export const discountService = {
           ? Boolean(payload.isActive)
           : rules[idx].isActive,
       updatedAt: new Date().toISOString(),
-    };
+    });
 
     rules[idx] = updated;
     saveStoredDiscountRules(rules);
