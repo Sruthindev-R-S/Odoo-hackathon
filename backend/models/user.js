@@ -1,21 +1,21 @@
 const pool = require("../config/db_connect");
 const { hashPassword, verifyPassword } = require("../config/argon");
 
-async function createUser(name, email, password, role) {
+async function createUser(name, email, password) {
 	const passwordHash = await hashPassword(password);
 	const query = `
-		INSERT INTO users (name, email, password, role)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, name, email, role;
+		INSERT INTO users (name, email, password)
+		VALUES ($1, $2, $3)
+		RETURNING id, name, email;
 	`;
 
-	const { rows } = await pool.query(query, [name, email, passwordHash, role]);
+	const { rows } = await pool.query(query, [name, email, passwordHash]);
 	return rows[0];
 }
 
 async function getUserByCredentials(name, password) {
 	const query = `
-		SELECT id, name, email, role, password
+		SELECT id, name, email, password
 		FROM users
 		WHERE name = $1;
 	`;

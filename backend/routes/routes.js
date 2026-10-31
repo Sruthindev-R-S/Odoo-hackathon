@@ -8,11 +8,11 @@ const { createBlog, getBlogs } = require("../models/blog");
 const router = express.Router();
 
 router.post("/register", async (req, res) => {
-	const { name, email, password, role } = req.body;
+	const { name, email, password } = req.body;
 
-	if (!name || !email || !password || !role) {
+	if (!name || !email || !password) {
 		return res.status(400).json({
-			error: "Name, email, password, and role are required",
+			error: "Name, email, and password are required",
 		});
 	}
 
@@ -23,7 +23,7 @@ router.post("/register", async (req, res) => {
 	}
 
 	try {
-		const user = await createUser(name.trim(), email.trim(), password, role.trim());
+		const user = await createUser(name.trim(), email.trim(), password);
 
 		return res.status(201).json({
 			message: "Registration successful",
