@@ -10,6 +10,7 @@ import {
   Percent,
   PlayCircle,
   CreditCard,
+  TrendingUp,
 } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -96,6 +97,13 @@ export default function AdminDashboard({ onNavigate }) {
             onClick={() => onNavigate('plans')}
           >
             Manage Plans
+          </Button>
+          <Button
+            variant="secondary"
+            icon={TrendingUp}
+            onClick={() => onNavigate('finance')}
+          >
+            Finance Lead (Month-End)
           </Button>
           <Button
             variant="secondary"

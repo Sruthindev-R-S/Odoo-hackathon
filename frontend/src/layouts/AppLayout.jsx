@@ -19,6 +19,7 @@ import {
   X,
   Shield,
   ChevronRight,
+  TrendingUp,
 } from 'lucide-react';
 
 const ADMIN_NAV_ITEMS = [
@@ -83,6 +84,12 @@ const ADMIN_NAV_ITEMS = [
     group: 'Operations',
   },
   {
+    id: 'finance',
+    label: 'Finance Lead (Month-End)',
+    icon: TrendingUp,
+    group: 'Operations',
+  },
+  {
     id: 'staff',
     label: 'Staff Members',
     icon: Users,
@@ -113,6 +120,12 @@ const STAFF_NAV_ITEMS = [
     id: 'payments',
     label: 'The Money Comes In (Payments)',
     icon: CreditCard,
+    group: 'Daily Operations',
+  },
+  {
+    id: 'finance',
+    label: 'Finance Lead (Month-End)',
+    icon: TrendingUp,
     group: 'Daily Operations',
   },
   {

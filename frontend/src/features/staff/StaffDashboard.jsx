@@ -8,6 +8,7 @@ import {
   PlayCircle,
   ArrowRight,
   Briefcase,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { operationsService } from '../../api/services/operationsService';
@@ -96,6 +97,13 @@ export default function StaffDashboard({ onNavigate }) {
             onClick={() => onNavigate('invoices')}
           >
             Invoices & Billing
+          </Button>
+          <Button
+            variant="secondary"
+            icon={TrendingUp}
+            onClick={() => onNavigate('finance')}
+          >
+            Finance Lead (Month-End)
           </Button>
           <Button
             variant="secondary"

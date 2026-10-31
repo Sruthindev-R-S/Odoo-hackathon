@@ -5,6 +5,7 @@ import SubscriptionManagement from '../operations/SubscriptionManagement';
 import InvoiceManagement from '../operations/InvoiceManagement';
 import PaymentsPage from '../payments/PaymentsPage';
 import StaffCatalogView from './StaffCatalogView';
+import FinanceOverviewPage from '../../pages/FinanceOverviewPage';
 
 export default function StaffWorkspace({ initialTab = 'dashboard' }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -34,6 +35,9 @@ export default function StaffWorkspace({ initialTab = 'dashboard' }) {
         />
       )}
       {currentTab === 'payments' && <PaymentsPage />}
+      {currentTab === 'finance' && (
+        <FinanceOverviewPage onNavigate={handleTabChange} />
+      )}
       {currentTab === 'catalog' && <StaffCatalogView />}
     </AppLayout>
   );
