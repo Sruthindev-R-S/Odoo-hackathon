@@ -97,6 +97,13 @@ export default function StaffDashboard({ onNavigate }) {
           >
             Invoices & Billing
           </Button>
+          <Button
+            variant="secondary"
+            icon={CreditCard}
+            onClick={() => onNavigate('payments')}
+          >
+            Payments & Collections
+          </Button>
         </div>
       </div>
 
@@ -152,7 +159,7 @@ export default function StaffDashboard({ onNavigate }) {
 
         <Card
           hoverable
-          onClick={() => onNavigate('invoices')}
+          onClick={() => onNavigate('payments')}
           className="p-6 cursor-pointer border-zinc-200 hover:border-zinc-400 bg-white"
         >
           <div className="flex items-center justify-between">

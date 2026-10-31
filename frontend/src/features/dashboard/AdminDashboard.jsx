@@ -9,12 +9,15 @@ import {
   Sparkles,
   Percent,
   PlayCircle,
+  CreditCard,
 } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { useProducts } from '../products/useProducts';
 import { usePlans } from '../plans/usePlans';
 import { taxService } from '../../api/services/taxService';
+import { operationsService } from '../../api/services/operationsService';
+import { formatMoney } from '../../lib/format';
 import {
   discountService,
   getDiscountRuleStatus,
@@ -25,10 +28,18 @@ export default function AdminDashboard({ onNavigate }) {
   const { plans } = usePlans();
   const [taxRules, setTaxRules] = useState([]);
   const [discountRules, setDiscountRules] = useState([]);
+  const [paymentSummary, setPaymentSummary] = useState({
+    totalCollected: 0,
+    totalOutstanding: 0,
+    overdueAmount: 0,
+    overdueCount: 0,
+    paymentCount: 0,
+  });
 
   useEffect(() => {
     taxService.getTaxRules().then(setTaxRules);
     discountService.getDiscountRules().then(setDiscountRules);
+    operationsService.getPaymentSummary().then(setPaymentSummary).catch(() => {});
   }, []);
 
   const totalVariants = products.reduce(
@@ -86,11 +97,18 @@ export default function AdminDashboard({ onNavigate }) {
           >
             Manage Plans
           </Button>
+          <Button
+            variant="secondary"
+            icon={CreditCard}
+            onClick={() => onNavigate('payments')}
+          >
+            Payments & Collections
+          </Button>
         </div>
       </div>
 
       {/* KPI Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {/* Products KPI */}
         <Card
           hoverable
@@ -217,6 +235,30 @@ export default function AdminDashboard({ onNavigate }) {
             </p>
           </div>
         </Card>
+        {/* Payments & Revenue Collected KPI */}
+        <Card
+          hoverable
+          onClick={() => onNavigate('payments')}
+          className="p-6 cursor-pointer border-zinc-200 hover:border-zinc-400 bg-white"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-center font-bold">
+              <CreditCard className="w-5 h-5 text-emerald-700" />
+            </div>
+            <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-zinc-900" />
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-bold text-zinc-900 tabular-nums">
+              {formatMoney(paymentSummary.totalCollected || 0)}
+            </div>
+            <div className="text-sm font-semibold text-zinc-700 mt-0.5">
+              Revenue Collected
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              {paymentSummary.paymentCount || 0} payments recorded · {formatMoney(paymentSummary.totalOutstanding || 0)} pending
+            </p>
+          </div>
+        </Card>
       </div>
 
       {/* Quick Feature Spotlight Card */}
@@ -227,7 +269,7 @@ export default function AdminDashboard({ onNavigate }) {
             Catalog, Plan Rules & Automated Billing Reference
           </h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-zinc-600">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs text-zinc-600">
           <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200 space-y-2">
             <h3 className="font-bold text-zinc-900 text-sm">Product Variants & Adjustments</h3>
             <p>
@@ -244,6 +286,12 @@ export default function AdminDashboard({ onNavigate }) {
             <h3 className="font-bold text-zinc-900 text-sm">Automated Billing Day & Taxes</h3>
             <p>
               Billing Day generates Draft invoices from due subscriptions with customer lines and Admin tax rules pre-filled, moving cleanly through <span className="font-semibold text-zinc-800">Draft → Confirmed → Paid</span> without duplicates.
+            </p>
+          </div>
+          <div className="bg-zinc-50 p-4 rounded-lg border border-zinc-200 space-y-2">
+            <h3 className="font-bold text-zinc-900 text-sm">The Money Comes In · Collections</h3>
+            <p>
+              Record multi-instrument payments (Bank Wire, UPI, POS Cards, Cheque), trace incoming money against invoices, and chase overdue accounts before they turn into losses.
             </p>
           </div>
         </div>
