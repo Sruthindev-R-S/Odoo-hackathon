@@ -6,11 +6,8 @@ import Button from '../components/ui/Button';
 export default function RequireAdmin({ children }) {
   const { user, signOut } = useAuth();
 
-  if (!user) {
-    return <Navigate to="/signin" replace />;
-  }
-
-  if (user.role !== 'admin') {
+  // If user is logged in as a non-admin (e.g. customer), show role elevation prompt
+  if (user && user.role !== 'admin') {
     const handleElevate = () => {
       const updated = { ...user, role: 'admin' };
       localStorage.setItem('brightloop_current_user_v1', JSON.stringify(updated));

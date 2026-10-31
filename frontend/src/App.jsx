@@ -202,8 +202,9 @@ export default function App() {
               }
             />
 
-            {/* Authenticated Landing */}
-            <Route path="/" element={<AccountOverview />} />
+            {/* Main Products & Plans Catalog Workspace */}
+            <Route path="/" element={<AdminWorkspace initialTab="products" />} />
+            <Route path="/account" element={<AccountOverview />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </BrowserRouter>

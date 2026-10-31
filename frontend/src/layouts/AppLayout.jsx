@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   LayoutDashboard,
@@ -126,13 +127,21 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
             </span>
           </div>
 
-          <button
-            onClick={signOut}
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-slate-700/60"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Sign Out
-          </button>
+          <div className="flex gap-2">
+            <Link
+              to="/account"
+              className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-slate-700/60 no-underline"
+            >
+              Account
+            </Link>
+            <button
+              onClick={user ? signOut : () => { window.location.href = '/signin'; }}
+              className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors border border-slate-700/60"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              {user ? 'Sign Out' : 'Sign In'}
+            </button>
+          </div>
         </div>
       </aside>
 
