@@ -102,7 +102,7 @@ export default function StaffDashboard({ onNavigate }) {
             icon={CreditCard}
             onClick={() => onNavigate('payments')}
           >
-            Payments & Collections
+            The Money Comes In
           </Button>
         </div>
       </div>
@@ -173,10 +173,10 @@ export default function StaffDashboard({ onNavigate }) {
               {loading ? '—' : formatMoney(totalCollected)}
             </div>
             <div className="text-sm font-semibold text-zinc-700 mt-0.5">
-              Payments Collected
+              The Money Comes In
             </div>
             <p className="text-xs text-zinc-400 mt-1">
-              Settled customer invoice receipts
+              {formatMoney(totalCollected)} collected customer receipts
             </p>
           </div>
         </Card>

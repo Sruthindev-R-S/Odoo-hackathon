@@ -80,6 +80,18 @@ function AccountOverview() {
             >
               {homeLabel}
             </Link>
+            <Link
+              to="/payments"
+              className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 no-underline"
+            >
+              The Money Comes In
+            </Link>
+            <Link
+              to="/invoices"
+              className="text-xs font-medium text-zinc-700 hover:text-zinc-900 no-underline"
+            >
+              Billing Day & Invoices
+            </Link>
             {canAccessBillingCheckout && (
               <Link
                 to="/portal/billing"
@@ -160,6 +172,12 @@ function AccountOverview() {
               className="flex-1 text-center px-4 py-2 rounded-lg text-sm font-medium bg-zinc-900 text-white hover:bg-zinc-800 no-underline transition-colors"
             >
               {homeLabel}
+            </Link>
+            <Link
+              to="/payments"
+              className="flex-1 text-center px-4 py-2 rounded-lg text-sm font-medium bg-emerald-700 text-white hover:bg-emerald-800 no-underline transition-colors"
+            >
+              The Money Comes In
             </Link>
             {canAccessBillingCheckout && (
               <Link
@@ -347,6 +365,30 @@ export default function App() {
             />
             <Route
               path="/payments"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
+                  <PaymentsRouter />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/money"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
+                  <PaymentsRouter />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/the-money-comes-in"
+              element={
+                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
+                  <PaymentsRouter />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/collections"
               element={
                 <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
                   <PaymentsRouter />

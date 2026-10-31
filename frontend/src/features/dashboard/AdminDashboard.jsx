@@ -102,7 +102,7 @@ export default function AdminDashboard({ onNavigate }) {
             icon={CreditCard}
             onClick={() => onNavigate('payments')}
           >
-            Payments & Collections
+            The Money Comes In
           </Button>
         </div>
       </div>
@@ -252,10 +252,10 @@ export default function AdminDashboard({ onNavigate }) {
               {formatMoney(paymentSummary.totalCollected || 0)}
             </div>
             <div className="text-sm font-semibold text-zinc-700 mt-0.5">
-              Revenue Collected
+              The Money Comes In
             </div>
             <p className="text-xs text-zinc-400 mt-1">
-              {paymentSummary.paymentCount || 0} payments recorded · {formatMoney(paymentSummary.totalOutstanding || 0)} pending
+              {formatMoney(paymentSummary.totalCollected || 0)} collected · {formatMoney(paymentSummary.totalOutstanding || 0)} outstanding
             </p>
           </div>
         </Card>

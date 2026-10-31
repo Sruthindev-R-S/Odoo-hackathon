@@ -27,7 +27,7 @@ import { InvoiceStatusBadge } from '../../components/domain/SubscriptionStatusBa
 import { useToast } from '../../components/ui/useToast';
 import { formatDate, formatMoney } from '../../lib/format';
 
-export default function InvoiceManagement({ onConfigureTaxes }) {
+export default function InvoiceManagement({ onConfigureTaxes, onOpenPayments }) {
   const { user } = useAuth();
   const { showToast } = useToast();
 
@@ -333,15 +333,26 @@ export default function InvoiceManagement({ onConfigureTaxes }) {
           </span>
         </div>
 
-        {onConfigureTaxes && (
-          <button
-            type="button"
-            onClick={onConfigureTaxes}
-            className="text-xs font-semibold text-zinc-900 hover:underline underline-offset-4 bg-transparent border-0 p-0 cursor-pointer self-start sm:self-auto"
-          >
-            Manage Tax Rules →
-          </button>
-        )}
+        <div className="flex items-center gap-4 self-start sm:self-auto flex-wrap">
+          {onOpenPayments && (
+            <button
+              type="button"
+              onClick={onOpenPayments}
+              className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 hover:underline underline-offset-4 bg-transparent border-0 p-0 cursor-pointer"
+            >
+              The Money Comes In (Payments) →
+            </button>
+          )}
+          {onConfigureTaxes && (
+            <button
+              type="button"
+              onClick={onConfigureTaxes}
+              className="text-xs font-semibold text-zinc-900 hover:underline underline-offset-4 bg-transparent border-0 p-0 cursor-pointer"
+            >
+              Manage Tax Rules →
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Latest Billing Run Summary (if run at least once) */}

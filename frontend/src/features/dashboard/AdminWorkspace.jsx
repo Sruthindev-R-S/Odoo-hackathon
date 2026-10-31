@@ -43,6 +43,7 @@ export default function AdminWorkspace({ initialTab = 'dashboard' }) {
       {currentTab === 'invoices' && (
         <InvoiceManagement
           onConfigureTaxes={() => handleTabChange('taxes')}
+          onOpenPayments={() => handleTabChange('payments')}
         />
       )}
       {currentTab === 'payments' && <PaymentsPage />}

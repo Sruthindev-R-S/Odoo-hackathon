@@ -28,7 +28,11 @@ export default function StaffWorkspace({ initialTab = 'dashboard' }) {
           onInvoiceGenerated={() => handleTabChange('invoices')}
         />
       )}
-      {currentTab === 'invoices' && <InvoiceManagement />}
+      {currentTab === 'invoices' && (
+        <InvoiceManagement
+          onOpenPayments={() => handleTabChange('payments')}
+        />
+      )}
       {currentTab === 'payments' && <PaymentsPage />}
       {currentTab === 'catalog' && <StaffCatalogView />}
     </AppLayout>

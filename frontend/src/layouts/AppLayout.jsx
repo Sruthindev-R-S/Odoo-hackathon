@@ -78,7 +78,7 @@ const ADMIN_NAV_ITEMS = [
   },
   {
     id: 'payments',
-    label: 'Payments & Collections',
+    label: 'The Money Comes In (Payments)',
     icon: CreditCard,
     group: 'Operations',
   },
@@ -111,7 +111,7 @@ const STAFF_NAV_ITEMS = [
   },
   {
     id: 'payments',
-    label: 'Payments & Collections',
+    label: 'The Money Comes In (Payments)',
     icon: CreditCard,
     group: 'Daily Operations',
   },

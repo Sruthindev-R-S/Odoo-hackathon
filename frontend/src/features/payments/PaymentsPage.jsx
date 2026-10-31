@@ -237,17 +237,17 @@ export default function PaymentsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-zinc-200">
         <div>
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0E7C86] uppercase tracking-wider mb-1">
-            <DollarSign className="w-3.5 h-3.5" />
-            PDF Scene: The Money Comes In
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 mb-1.5">
+            <DollarSign className="w-3.5 h-3.5 text-emerald-700" />
+            PDF Section: The Money Comes In
           </div>
-          <h1 className="text-2xl font-bold text-[#16233B] tracking-tight">
-            Payments & Collections
+          <h1 className="text-2xl font-bold text-zinc-900 tracking-tight">
+            The Money Comes In · Payments & Collections
           </h1>
-          <p className="text-sm text-slate-500 mt-1 max-w-2xl">
-            Payments arrive by different methods and on different days. Record incoming money against the right invoice, reconcile settlements, and chase overdue accounts before they turn into lost revenue.
+          <p className="text-sm text-zinc-600 mt-1 max-w-2xl">
+            Payments arrive by different methods and on different days. Record incoming money against the right invoice with method, amount, date, and notes, reconcile settlements, and chase overdue accounts before they turn into lost revenue.
           </p>
         </div>
 
