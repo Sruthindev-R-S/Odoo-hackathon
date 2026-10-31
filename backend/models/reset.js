@@ -7,8 +7,14 @@ async function createPasswordResetTokensTable() {
 			name VARCHAR(255) NOT NULL,
 			email VARCHAR(255) NOT NULL UNIQUE,
 			password TEXT NOT NULL,
-			role VARCHAR(100) NOT NULL
+			role VARCHAR(100) NOT NULL,
+			status BOOLEAN NOT NULL DEFAULT FALSE
 		);
+	`);
+
+	await pool.query(`
+		ALTER TABLE company_users
+		ADD COLUMN IF NOT EXISTS status BOOLEAN NOT NULL DEFAULT FALSE;
 	`);
 
 	await pool.query(`
