@@ -190,6 +190,9 @@ Status: Periodic Feature Progress & Roadmap Tracker
 --------------------------------------------------------------------------------
 5. REVISION & UPDATE LOG
 --------------------------------------------------------------------------------
+- 2026-10-31 14:44 IST: Pulled latest changes from origin/main (commit 560c4a0).
+  Added Customer seat updates, automated volume discounts at checkout, live seat
+  discount preview on invoice runs, multi-product targeting, and rule expiry locking.
 - 2026-10-31 14:05 IST: Pulled latest changes from origin/main (commit 9912fd1).
   Added Discount Management, Quotation Templates, and Backend migrations/controllers.
 - 2026-10-31 13:54 IST: Pushed branch 'money' to origin with Payments & Collections
