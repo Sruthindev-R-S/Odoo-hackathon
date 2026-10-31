@@ -11,6 +11,7 @@ import { BrandLogo } from './components/common/BrandLogo';
 import { Badge } from './components/common/Badge';
 import RequireAdmin from './auth/RequireAdmin';
 import AdminWorkspace from './features/dashboard/AdminWorkspace';
+import CustomerBillingPage from './features/billing/CustomerBillingPage';
 
 function AccountOverview() {
   const { user, signOut } = useAuth();
@@ -48,6 +49,18 @@ function AccountOverview() {
               }}
             >
               Subscription Plans
+            </Link>
+            <Link
+              to="/billing"
+              style={{
+                fontSize: 13,
+                textDecoration: 'none',
+                color: 'var(--bl-text-secondary)',
+                fontWeight: 500,
+                transition: 'color 0.15s'
+              }}
+            >
+              Customer Billing
             </Link>
             <Link
               to="/admin"
@@ -130,6 +143,13 @@ function AccountOverview() {
                 >
                   Manage Subscription Plans
                 </Link>
+                <Link
+                  to="/billing"
+                  className="bl-btn bl-btn-secondary"
+                  style={{ textDecoration: 'none', textAlign: 'center', flex: 1, minWidth: 160, padding: '9px 16px', fontSize: 13 }}
+                >
+                  Customer Billing & Checkout
+                </Link>
               </div>
             </div>
           </div>
@@ -201,6 +221,12 @@ export default function App() {
                 </RequireAdmin>
               }
             />
+
+            {/* Customer Plan Selection & Recurring Billing Checkout */}
+            <Route path="/billing" element={<CustomerBillingPage />} />
+            <Route path="/portal/billing" element={<CustomerBillingPage />} />
+            <Route path="/portal/subscriptions/new" element={<CustomerBillingPage />} />
+            <Route path="/checkout" element={<CustomerBillingPage />} />
 
             {/* Main Products & Plans Catalog Workspace */}
             <Route path="/" element={<AdminWorkspace initialTab="products" />} />

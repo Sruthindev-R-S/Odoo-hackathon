@@ -3,6 +3,7 @@ import AppLayout from '../../layouts/AppLayout';
 import AdminDashboard from './AdminDashboard';
 import ProductManagement from '../products/ProductManagement';
 import PlanManagement from '../plans/PlanManagement';
+import CustomerBillingPage from '../billing/CustomerBillingPage';
 
 export default function AdminWorkspace({ initialTab = 'dashboard' }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,6 +20,7 @@ export default function AdminWorkspace({ initialTab = 'dashboard' }) {
       )}
       {currentTab === 'products' && <ProductManagement />}
       {currentTab === 'plans' && <PlanManagement />}
+      {currentTab === 'billing' && <CustomerBillingPage />}
     </AppLayout>
   );
 }

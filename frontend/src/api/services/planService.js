@@ -11,12 +11,75 @@
 
 const STORAGE_KEY = 'brightloop_plans';
 
+const SEED_PLANS = [
+  {
+    id: 'plan_pro_monthly',
+    name: 'Brightloop Pro Growth',
+    productId: 'prod_core_01',
+    productName: 'Brightloop Core Recurring Engine',
+    price: 1560,
+    billingPeriod: 'monthly',
+    minQuantity: 1,
+    availableFrom: '2026-01-01',
+    availableTo: '2026-12-31',
+    autoCloseOnEnd: false,
+    allowEarlyClose: true,
+    allowPause: true,
+    allowRenewal: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'plan_enterprise_annual',
+    name: 'Enterprise Annual Suite',
+    productId: 'prod_core_01',
+    productName: 'Brightloop Core Recurring Engine',
+    price: 14900,
+    billingPeriod: 'yearly',
+    minQuantity: 2,
+    availableFrom: '2026-01-01',
+    availableTo: '2027-12-31',
+    autoCloseOnEnd: true,
+    allowEarlyClose: false,
+    allowPause: true,
+    allowRenewal: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'plan_starter_monthly',
+    name: 'Starter Business Monthly',
+    productId: 'prod_analytics_02',
+    productName: 'Advanced Revenue Analytics & Reporting',
+    price: 499,
+    billingPeriod: 'monthly',
+    minQuantity: 1,
+    availableFrom: '2026-01-01',
+    availableTo: '2026-12-31',
+    autoCloseOnEnd: false,
+    allowEarlyClose: true,
+    allowPause: true,
+    allowRenewal: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
+
 function getStoredPlans() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_PLANS));
+      return SEED_PLANS;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_PLANS));
+      return SEED_PLANS;
+    }
+    return parsed;
   } catch {
-    return [];
+    return SEED_PLANS;
   }
 }
 

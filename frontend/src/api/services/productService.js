@@ -12,13 +12,70 @@
 
 const STORAGE_KEY = 'brightloop_products';
 
+const SEED_PRODUCTS = [
+  {
+    id: 'prod_core_01',
+    name: 'Brightloop Core Recurring Engine',
+    type: 'software',
+    salesPrice: 1000,
+    costPrice: 400,
+    notes: 'Primary subscription billing and invoicing engine with automated dunning',
+    isActive: true,
+    variants: [
+      { id: 'var_odoo_01', attribute: 'Brand', value: 'Odoo Edition', extraPrice: 560 },
+      { id: 'var_std_01', attribute: 'Brand', value: 'Standard Cloud', extraPrice: 0 }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'prod_analytics_02',
+    name: 'Advanced Revenue Analytics & Reporting',
+    type: 'service',
+    salesPrice: 350,
+    costPrice: 120,
+    notes: 'MRR/ARR cohorts, churn forecasting, and cash flow reconciliation',
+    isActive: true,
+    variants: [
+      { id: 'var_tier_pro', attribute: 'Tier', value: 'Pro Suite', extraPrice: 150 },
+      { id: 'var_tier_std', attribute: 'Tier', value: 'Basic Metrics', extraPrice: 0 }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'prod_storage_03',
+    name: 'Encrypted Document & Invoice Storage',
+    type: 'addon',
+    salesPrice: 199,
+    costPrice: 50,
+    notes: 'Compliant tamper-proof storage for audit invoices and customer receipts',
+    isActive: true,
+    variants: [
+      { id: 'var_storage_100', attribute: 'Capacity', value: '100 GB', extraPrice: 100 },
+      { id: 'var_storage_25', attribute: 'Capacity', value: '25 GB', extraPrice: 0 }
+    ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
+
 // Helper to safely access browser storage
 function getStoredProducts() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_PRODUCTS));
+      return SEED_PRODUCTS;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_PRODUCTS));
+      return SEED_PRODUCTS;
+    }
+    return parsed;
   } catch {
-    return [];
+    return SEED_PRODUCTS;
   }
 }
 

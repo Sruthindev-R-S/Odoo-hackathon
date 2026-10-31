@@ -10,6 +10,7 @@ import {
   X,
   Shield,
   ChevronRight,
+  Receipt,
 } from 'lucide-react';
 
 export default function AppLayout({ currentTab, onNavigate, children }) {
@@ -34,6 +35,12 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
       label: 'Subscription Plans',
       icon: CalendarDays,
       description: 'Pricing tiers & recurrence rules',
+    },
+    {
+      id: 'billing',
+      label: 'Customer Billing',
+      icon: Receipt,
+      description: 'Customer plan selection and checkout',
     },
   ];
 
