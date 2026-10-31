@@ -16,6 +16,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../components/ui/ToastContext';
 import { planService } from '../../api/services/planService';
 import { productService } from '../../api/services/productService';
+import {
+  discountService,
+  evaluateApplicableDiscount,
+} from '../../api/services/discountService';
 import { billingService, computeNextBillingDate } from '../../api/services/billingService';
 import { formatMoney, formatDate } from '../../lib/format';
 import { BrandLogo } from '../../components/common/BrandLogo';
@@ -31,6 +35,7 @@ export default function CustomerBillingPage() {
   const [loading, setLoading] = useState(true);
   const [plans, setPlans] = useState([]);
   const [products, setProducts] = useState([]);
+  const [discountRules, setDiscountRules] = useState([]);
 
   // Selected state
   const [selectedPlanId, setSelectedPlanId] = useState(null);
@@ -62,12 +67,15 @@ export default function CustomerBillingPage() {
     async function loadCatalog() {
       setLoading(true);
       try {
-        const [loadedPlans, loadedProducts] = await Promise.all([
-          planService.getPlans(),
-          productService.getProducts(),
-        ]);
+        const [loadedPlans, loadedProducts, loadedDiscounts] =
+          await Promise.all([
+            planService.getPlans(),
+            productService.getProducts(),
+            discountService.getDiscountRules(),
+          ]);
         setPlans(loadedPlans);
         setProducts(loadedProducts);
+        setDiscountRules(loadedDiscounts);
 
         // Auto-select initial plan
         if (loadedPlans.length > 0) {
@@ -129,7 +137,17 @@ export default function CustomerBillingPage() {
   // Calculate pricing
   const pricingCalculation = useMemo(() => {
     if (!currentPlan) {
-      return { planTotal: 0, addOnsTotal: 0, subtotal: 0, taxAmount: 0, totalAmount: 0, addOnItems: [] };
+      return {
+        planTotal: 0,
+        addOnsTotal: 0,
+        grossSubtotal: 0,
+        discountAmount: 0,
+        discountLabel: '',
+        subtotal: 0,
+        taxAmount: 0,
+        totalAmount: 0,
+        addOnItems: [],
+      };
     }
 
     const qty = Math.max(Number(planQuantity) || 1, currentPlan.minQuantity || 1);
@@ -139,6 +157,17 @@ export default function CustomerBillingPage() {
 
     const addOnItems = [];
     let addOnsTotal = 0;
+
+    const candidateLines = [
+      {
+        id: 'checkout_plan_line',
+        productId: planProduct?.id || currentPlan.productId || '',
+        productName: planProduct?.name || currentPlan.productName || currentPlan.name,
+        quantity: qty,
+        unitPrice: planUnitPrice,
+        amount: planTotal,
+      },
+    ];
 
     Object.entries(selectedAddons).forEach(([productId, config]) => {
       if (!config || !config.selected) return;
@@ -159,9 +188,20 @@ export default function CustomerBillingPage() {
         unitPrice,
         amount,
       });
+
+      candidateLines.push({
+        id: `checkout_addon_${productId}`,
+        productId: addonProd.id,
+        productName: addonProd.name,
+        quantity: addonQty,
+        unitPrice,
+        amount,
+      });
     });
 
-    const subtotal = planTotal + addOnsTotal;
+    const discCalc = evaluateApplicableDiscount(candidateLines, {}, discountRules);
+    const grossSubtotal = discCalc.grossSubtotal;
+    const subtotal = discCalc.netSubtotal;
     const taxRate = 0.18; // 18% GST
     const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
     const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100;
@@ -170,6 +210,9 @@ export default function CustomerBillingPage() {
       planUnitPrice,
       planTotal,
       addOnsTotal,
+      grossSubtotal,
+      discountAmount: discCalc.discountAmount,
+      discountLabel: discCalc.discountLabel,
       subtotal,
       taxRate: '18% GST',
       taxAmount,
@@ -177,7 +220,15 @@ export default function CustomerBillingPage() {
       addOnItems,
       qty,
     };
-  }, [currentPlan, planVariant, planQuantity, selectedAddons, products]);
+  }, [
+    currentPlan,
+    planProduct,
+    planVariant,
+    planQuantity,
+    selectedAddons,
+    products,
+    discountRules,
+  ]);
 
   // Handle plan selection change
   const handleSelectPlan = (plan) => {
@@ -418,6 +469,24 @@ export default function CustomerBillingPage() {
             {/* Totals Summary */}
             <div className="pt-4 border-t border-zinc-200 flex flex-col items-end">
               <div className="w-full sm:w-64 space-y-2 text-xs">
+                {invoice.discountAmount > 0 && (
+                  <>
+                    <div className="flex justify-between text-zinc-600">
+                      <span>Gross Subtotal</span>
+                      <span className="tabular-nums font-medium">
+                        {formatMoney(invoice.grossSubtotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-emerald-700 font-medium">
+                      <span>
+                        Discount ({invoice.discountLabel || invoice.discountName})
+                      </span>
+                      <span className="tabular-nums">
+                        -{formatMoney(invoice.discountAmount)}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-zinc-600">
                   <span>Subtotal</span>
                   <span className="tabular-nums font-medium">{formatMoney(invoice.subtotal)}</span>
@@ -1037,6 +1106,24 @@ export default function CustomerBillingPage() {
 
                 {/* Subtotals & Taxes */}
                 <div className="pt-4 border-t border-zinc-100 space-y-2 text-xs">
+                  {pricingCalculation.discountAmount > 0 && (
+                    <>
+                      <div className="flex justify-between text-zinc-600">
+                        <span>Gross Subtotal</span>
+                        <span className="tabular-nums font-medium">
+                          {formatMoney(pricingCalculation.grossSubtotal)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-emerald-700 font-medium">
+                        <span>
+                          Discount ({pricingCalculation.discountLabel})
+                        </span>
+                        <span className="tabular-nums">
+                          -{formatMoney(pricingCalculation.discountAmount)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between text-zinc-600">
                     <span>Subtotal</span>
                     <span className="tabular-nums font-medium">

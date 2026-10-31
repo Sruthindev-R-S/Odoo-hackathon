@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
   Repeat,
@@ -14,9 +14,14 @@ import {
   Calendar,
   Receipt,
   ArrowRight,
+  Tag,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { operationsService } from '../../api/services/operationsService';
+import {
+  discountService,
+  evaluateApplicableDiscount,
+} from '../../api/services/discountService';
 import { planService } from '../../api/services/planService';
 import { productService } from '../../api/services/productService';
 import PortalLayout from '../../layouts/PortalLayout';
@@ -51,6 +56,7 @@ export default function CustomerPortal() {
   const [invoices, setInvoices] = useState([]);
   const [availablePlans, setAvailablePlans] = useState([]);
   const [products, setProducts] = useState([]);
+  const [discountRules, setDiscountRules] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [subscribeOpen, setSubscribeOpen] = useState(false);
@@ -63,6 +69,9 @@ export default function CustomerPortal() {
 
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [closingSub, setClosingSub] = useState(null);
+  const [seatModalSub, setSeatModalSub] = useState(null);
+  const [seatModalLines, setSeatModalLines] = useState([]);
+  const [seatSaving, setSeatSaving] = useState(false);
 
   const [viewingInvoice, setViewingInvoice] = useState(null);
   const [payingInvoice, setPayingInvoice] = useState(null);
@@ -80,12 +89,14 @@ export default function CustomerPortal() {
   const loadPortalData = useCallback(async () => {
     setLoading(true);
     try {
-      const [subs, invs, allPlans, allProducts] = await Promise.all([
-        operationsService.getSubscriptions(user),
-        operationsService.getInvoices(user),
-        planService.getPlans(),
-        productService.getProducts(),
-      ]);
+      const [subs, invs, allPlans, allProducts, allDiscounts] =
+        await Promise.all([
+          operationsService.getSubscriptions(user),
+          operationsService.getInvoices(user),
+          planService.getPlans(),
+          productService.getProducts(),
+          discountService.getDiscountRules(),
+        ]);
 
       const customerVisibleInvoices = invs.filter(
         (i) =>
@@ -101,6 +112,7 @@ export default function CustomerPortal() {
       setInvoices(customerVisibleInvoices);
       setAvailablePlans(activeCatalogPlans);
       setProducts(allProducts);
+      setDiscountRules(allDiscounts);
     } finally {
       setLoading(false);
     }
@@ -134,8 +146,101 @@ export default function CustomerPortal() {
 
   const baseUnit = Number(chosenPlan?.price) || 0;
   const extraUnit = Number(chosenVariant?.extraPrice) || 0;
-  const totalRecurring =
-    (baseUnit + extraUnit) * Math.max(1, Number(subForm.quantity) || 1);
+  const quickQty = Math.max(1, Number(subForm.quantity) || 1);
+  const grossRecurring = (baseUnit + extraUnit) * quickQty;
+  const quickSubDiscount = useMemo(() => {
+    if (!chosenPlan) {
+      return { discountAmount: 0, discountLabel: '', netSubtotal: 0 };
+    }
+    return evaluateApplicableDiscount(
+      [
+        {
+          id: 'quick_preview_line',
+          productId: chosenProduct?.id || chosenPlan.productId || '',
+          productName:
+            chosenProduct?.name || chosenPlan.productName || chosenPlan.name,
+          quantity: quickQty,
+          unitPrice: baseUnit + extraUnit,
+          amount: grossRecurring,
+        },
+      ],
+      {},
+      discountRules
+    );
+  }, [
+    chosenPlan,
+    chosenProduct,
+    quickQty,
+    baseUnit,
+    extraUnit,
+    grossRecurring,
+    discountRules,
+  ]);
+  const totalRecurring = quickSubDiscount.netSubtotal || grossRecurring;
+
+  const seatModalPreview = useMemo(() => {
+    if (!seatModalSub) {
+      return {
+        grossSubtotal: 0,
+        discountAmount: 0,
+        discountLabel: '',
+        netSubtotal: 0,
+      };
+    }
+    const candidateLines = (seatModalLines || []).map((l) => {
+      const qty = Math.max(1, Number(l.quantity) || 1);
+      const unit = Math.max(0, Number(l.unitPrice) || 0);
+      return {
+        ...l,
+        quantity: qty,
+        unitPrice: unit,
+        amount: qty * unit,
+      };
+    });
+    return evaluateApplicableDiscount(
+      candidateLines,
+      {
+        preferredRuleId: seatModalSub.preferredDiscountRuleId || '',
+      },
+      discountRules
+    );
+  }, [seatModalSub, seatModalLines, discountRules]);
+
+  const openSeatModal = (sub) => {
+    setSeatModalSub(sub);
+    setSeatModalLines(
+      (sub.lineItems || []).map((l) => ({
+        ...l,
+        quantity: Math.max(1, Number(l.quantity) || 1),
+      }))
+    );
+  };
+
+  const handleSaveCustomerSeats = async () => {
+    if (!seatModalSub) return;
+    setSeatSaving(true);
+    try {
+      const updated = await operationsService.updateSubscriptionSeatsAndDiscount(
+        seatModalSub.id,
+        { lines: seatModalLines },
+        user
+      );
+      showToast(
+        updated.discountAmount > 0
+          ? `Seats updated! ${updated.discountName} (-${formatMoney(
+              updated.discountAmount
+            )}) will apply on your next invoice.`
+          : `Seat quantities updated on ${updated.subscriptionNumber}.`,
+        'success'
+      );
+      setSeatModalSub(null);
+      await loadPortalData();
+    } catch (err) {
+      showToast(err.message || 'Could not update seat quantities.', 'error');
+    } finally {
+      setSeatSaving(false);
+    }
+  };
 
   const openSubscribeDrawer = () => {
     const first = availablePlans[0] || null;
@@ -700,6 +805,19 @@ export default function CustomerPortal() {
                     {/* Self-Service Controls governed by Plan's 4 Switches */}
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap gap-1.5">
+                        {(sub.status === 'active' ||
+                          sub.status === 'quotation') && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            icon={Tag}
+                            disabled={busy}
+                            onClick={() => openSeatModal(sub)}
+                          >
+                            Add / Update Seats
+                          </Button>
+                        )}
+
                         {sub.status === 'quotation' && (
                           <Button
                             variant="primary"
@@ -863,6 +981,11 @@ export default function CustomerPortal() {
                           </td>
                           <td className="py-3.5 px-4 text-right">
                             <MoneyText amount={inv.total} />
+                            {inv.discountAmount > 0 && (
+                              <div className="text-[11px] font-medium text-emerald-700 tabular-nums mt-0.5">
+                                -{formatMoney(inv.discountAmount)} discount
+                              </div>
+                            )}
                           </td>
                           <td className="py-3.5 px-4 text-right">
                             <MoneyText amount={inv.amountDue} />
@@ -1005,6 +1128,22 @@ export default function CustomerPortal() {
                   </span>
                 </div>
               )}
+              {quickSubDiscount.discountAmount > 0 && (
+                <>
+                  <div className="flex justify-between text-zinc-600">
+                    <span>Gross Subtotal</span>
+                    <span className="tabular-nums font-medium text-zinc-900">
+                      {formatMoney(grossRecurring)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-emerald-700 font-medium">
+                    <span>Discount ({quickSubDiscount.discountLabel})</span>
+                    <span className="tabular-nums">
+                      -{formatMoney(quickSubDiscount.discountAmount)}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="border-t border-zinc-200 pt-2 flex justify-between text-sm font-bold text-zinc-900">
                 <span>Recurring Subtotal</span>
                 <span className="tabular-nums">
@@ -1015,6 +1154,98 @@ export default function CustomerPortal() {
           )}
         </form>
       </Drawer>
+
+      {/* Customer Self-Service Seat Update Modal */}
+      <Modal
+        isOpen={Boolean(seatModalSub)}
+        onClose={() => setSeatModalSub(null)}
+        title="Add / Update Seats"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setSeatModalSub(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={seatSaving}
+              onClick={handleSaveCustomerSeats}
+            >
+              Update Seats
+            </Button>
+          </>
+        }
+      >
+        {seatModalSub && (
+          <div className="space-y-4">
+            <p className="text-xs text-zinc-600 leading-relaxed">
+              Update seat quantities for{' '}
+              <strong className="text-zinc-900">{seatModalSub.planName}</strong>{' '}
+              (<span className="font-mono">{seatModalSub.subscriptionNumber}</span>
+              ). Eligible volume discounts apply automatically on your next
+              invoice.
+            </p>
+            <div className="space-y-2.5">
+              {seatModalLines.map((line, idx) => (
+                <div
+                  key={line.id || idx}
+                  className="flex items-center justify-between gap-3 p-3 rounded-xl border border-zinc-200 bg-zinc-50/70"
+                >
+                  <div>
+                    <div className="text-xs font-semibold text-zinc-900">
+                      {line.productName || line.name}
+                    </div>
+                    <div className="text-[11px] text-zinc-500 tabular-nums">
+                      {formatMoney(line.unitPrice)} / seat
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <label className="text-xs text-zinc-500">Seats:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={line.quantity}
+                      onChange={(e) => {
+                        const qty = Math.max(1, Number(e.target.value) || 1);
+                        setSeatModalLines((prev) =>
+                          prev.map((item, i) =>
+                            i === idx ? { ...item, quantity: qty } : item
+                          )
+                        );
+                      }}
+                      className="w-20 px-2.5 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-semibold tabular-nums text-zinc-900"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 space-y-1.5 text-xs">
+              <div className="flex justify-between text-zinc-600">
+                <span>Gross Recurring Amount</span>
+                <span className="font-medium text-zinc-900 tabular-nums">
+                  {formatMoney(seatModalPreview.grossSubtotal)}
+                </span>
+              </div>
+              {seatModalPreview.discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-700 font-medium">
+                  <span>
+                    Automatic Discount ({seatModalPreview.discountLabel})
+                  </span>
+                  <span className="tabular-nums">
+                    -{formatMoney(seatModalPreview.discountAmount)}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between pt-1.5 border-t border-zinc-200 font-bold text-zinc-900">
+                <span>Net Subtotal (Next Invoice before tax)</span>
+                <span className="tabular-nums">
+                  {formatMoney(seatModalPreview.netSubtotal)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Close Confirmation Modal */}
       <Modal

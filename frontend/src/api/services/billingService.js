@@ -5,7 +5,11 @@
  * and automated invoice generation upon successful billing.
  */
 
-import { operationsService } from './operationsService';
+import { operationsService } from './operationsService.js';
+import {
+  evaluateApplicableDiscount,
+  consumeDiscountRuleUsage,
+} from './discountService.js';
 
 const STORAGE_SUBSCRIPTIONS_KEY = 'brightloop_subscriptions_v1';
 const STORAGE_INVOICES_KEY = 'brightloop_invoices_v1';
@@ -86,9 +90,12 @@ export const billingService = {
     const planTotal = planUnitPrice * qty;
 
     // Line items
+    const primaryProductId = product?.id || plan.productId || '';
     const lineItems = [
       {
         id: `line_plan_${Date.now()}`,
+        productId: primaryProductId,
+        productName: product ? product.name : plan.productName || plan.name,
         name: `${plan.name} (${product ? product.name : 'Subscription'})`,
         variant: selectedVariant ? `${selectedVariant.attribute}: ${selectedVariant.value}` : null,
         quantity: qty,
@@ -98,16 +105,16 @@ export const billingService = {
     ];
 
     // Add-on line items
-    let addOnsTotal = 0;
     addOns.forEach((addon, idx) => {
       const addonExtra = addon.selectedVariant ? Number(addon.selectedVariant.extraPrice) || 0 : 0;
       const addonPrice = (Number(addon.salesPrice) || 0) + addonExtra;
       const addonQty = Number(addon.quantity) || 1;
       const addonAmount = addonPrice * addonQty;
-      addOnsTotal += addonAmount;
 
       lineItems.push({
         id: `line_addon_${Date.now()}_${idx}`,
+        productId: addon.id || '',
+        productName: addon.name || 'Add-on',
         name: `Add-on: ${addon.name}`,
         variant: addon.selectedVariant ? `${addon.selectedVariant.attribute}: ${addon.selectedVariant.value}` : null,
         quantity: addonQty,
@@ -116,12 +123,18 @@ export const billingService = {
       });
     });
 
-    const subtotal = planTotal + addOnsTotal;
+    const startDate = new Date().toISOString().substring(0, 10);
+    const discCalc = evaluateApplicableDiscount(lineItems, { evalDate: startDate });
+    if (discCalc.discountAmount > 0 && discCalc.discountRuleId) {
+      consumeDiscountRuleUsage(discCalc.discountRuleId);
+    }
+
+    const grossSubtotal = discCalc.grossSubtotal;
+    const subtotal = discCalc.netSubtotal;
     const taxRate = 0.18; // 18% GST standard
     const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
     const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100;
 
-    const startDate = new Date().toISOString().substring(0, 10);
     const nextBillingDate = computeNextBillingDate(plan.billingPeriod);
     const serial = Math.floor(1000 + Math.random() * 9000);
 
@@ -134,6 +147,7 @@ export const billingService = {
       organization: customer.organization || 'Acme Enterprises',
       planId: plan.id,
       planName: plan.name,
+      productId: primaryProductId,
       billingPeriod: plan.billingPeriod || 'monthly',
       status: 'active',
       startDate,
@@ -141,6 +155,13 @@ export const billingService = {
       nextBillingDate,
       quantity: qty,
       unitPrice: planUnitPrice,
+      grossSubtotal,
+      discountRuleId: discCalc.discountRuleId,
+      discountName: discCalc.discountName,
+      discountLabel: discCalc.discountLabel,
+      discountAmount: discCalc.discountAmount,
+      appliedDiscountRuleId:
+        discCalc.discountAmount > 0 ? discCalc.discountRuleId : '',
       amount: totalAmount,
       subtotal,
       taxAmount,
@@ -165,6 +186,12 @@ export const billingService = {
       date: startDate,
       dueDate: startDate,
       period: `${startDate} — ${nextBillingDate}`,
+      grossSubtotal,
+      discountRuleId: discCalc.discountRuleId,
+      discountName: discCalc.discountName,
+      discountLabel: discCalc.discountLabel,
+      discountAmount: discCalc.discountAmount,
+      discountUsageConsumed: discCalc.discountAmount > 0,
       subtotal,
       taxRate: '18% GST',
       taxAmount,
