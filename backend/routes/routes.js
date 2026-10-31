@@ -3,9 +3,11 @@ const {
 	createUser,
 	getUserByCredentials,
 } = require("../models/user");
-const { createBlog, getBlogs } = require("../models/blog");
+const { forgotPassword } = require("../controllers/auth");
 
 const router = express.Router();
+
+router.post("/forgot-password", forgotPassword);
 
 router.post("/register", async (req, res) => {
 	const { name, email, password } = req.body;
@@ -63,42 +65,6 @@ router.post("/login", async (req, res) => {
 		console.error("Failed to log in user:", error);
 		return res.status(500).json({
 			error: "Failed to log in user",
-		});
-	}
-});
-
-router.post("/blog", async (req, res) => {
-	const { name, blog } = req.body;
-
-	if (!name || !blog) {
-		return res.status(400).json({
-			error: "Name and blog are required",
-		});
-	}
-
-	try {
-		const createdBlog = await createBlog(name.trim(), blog.trim());
-
-		return res.status(201).json({
-			message: "Blog created successfully",
-			blog: createdBlog,
-		});
-	} catch (error) {
-		console.error("Failed to create blog:", error);
-		return res.status(500).json({
-			error: "Failed to create blog",
-		});
-	}
-});
-
-router.get("/blog", async (req, res) => {
-	try {
-		const blogs = await getBlogs();
-		return res.json(blogs);
-	} catch (error) {
-		console.error("Failed to retrieve blogs:", error);
-		return res.status(500).json({
-			error: "Failed to retrieve blogs",
 		});
 	}
 });
