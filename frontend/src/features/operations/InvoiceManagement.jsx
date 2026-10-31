@@ -40,6 +40,9 @@ export default function InvoiceManagement({ onConfigureTaxes }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [confirmBillingOpen, setConfirmBillingOpen] = useState(false);
+  const [billingDate, setBillingDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
   const [runningBilling, setRunningBilling] = useState(false);
   const [confirmingBatch, setConfirmingBatch] = useState(false);
 
@@ -144,11 +147,15 @@ export default function InvoiceManagement({ onConfigureTaxes }) {
   const handleRunBilling = async () => {
     setRunningBilling(true);
     try {
-      const summary = await operationsService.runBilling(user);
+      const summary = await operationsService.runBilling(user, { billingDate });
       setConfirmBillingOpen(false);
       showToast(
         `Billing Day complete: Created ${summary.createdCount} Draft invoice${
           summary.createdCount === 1 ? '' : 's'
+        }${
+          summary.discountedCount > 0
+            ? ` (${summary.discountedCount} discounted automatically)`
+            : ''
         } · Skipped ${summary.skippedCount} (already billed)${
           summary.pausedCount > 0 ? ` · ${summary.pausedCount} paused` : ''
         }.`,
@@ -505,6 +512,11 @@ export default function InvoiceManagement({ onConfigureTaxes }) {
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <MoneyText amount={inv.total} />
+                          {inv.discountAmount > 0 && (
+                            <div className="text-[11px] font-medium text-emerald-700">
+                              -{formatMoney(inv.discountAmount)} discount
+                            </div>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <MoneyText amount={inv.amountDue} />
@@ -613,10 +625,18 @@ export default function InvoiceManagement({ onConfigureTaxes }) {
           </>
         }
       >
-        <div className="space-y-3 text-sm text-zinc-600 leading-relaxed">
+        <div className="space-y-3.5 text-sm text-zinc-600 leading-relaxed">
           <p>
             Automatically create <strong>Draft</strong> invoices for all active, unpaused subscriptions due in the current cycle?
           </p>
+          <Input
+            label="Billing Date"
+            type="date"
+            required
+            value={billingDate}
+            hint="Evaluates automatic discount validity dates, usage limits, and tax rules on this billing date."
+            onChange={(e) => setBillingDate(e.target.value)}
+          />
           <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-xs space-y-1.5">
             <div className="flex justify-between">
               <span className="text-zinc-500">Eligible Active Subscriptions</span>

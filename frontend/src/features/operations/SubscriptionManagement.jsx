@@ -642,6 +642,27 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
     }
   };
 
+  const seatEditPreview = useMemo(() => {
+    const candidateLines = (seatDraftLines || []).map((l) => {
+      const qty = Math.max(1, Number(l.quantity) || 1);
+      const unit = Math.max(0, Number(l.unitPrice) || 0);
+      return {
+        ...l,
+        quantity: qty,
+        unitPrice: unit,
+        amount: qty * unit,
+      };
+    });
+    return evaluateApplicableDiscount(
+      candidateLines,
+      {
+        evalDate: today,
+        preferredRuleId: seatDiscountRuleId,
+      },
+      discountRules
+    );
+  }, [seatDraftLines, seatDiscountRuleId, today, discountRules]);
+
   const discountRuleOptions = useMemo(() => {
     return [
       { value: '', label: 'Auto-apply eligible discount rule' },
@@ -1644,6 +1665,29 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
                     options={discountRuleOptions}
                     onChange={(e) => setSeatDiscountRuleId(e.target.value)}
                   />
+                  {seatEditPreview.discountAmount > 0 ? (
+                    <div className="px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 flex items-center justify-between gap-2">
+                      <span>
+                        Next invoice discount unlocked:{' '}
+                        <strong>{seatEditPreview.discountLabel}</strong>
+                      </span>
+                      <span className="font-semibold tabular-nums">
+                        -{formatMoney(seatEditPreview.discountAmount)}
+                      </span>
+                    </div>
+                  ) : seatEditPreview.stoppedReason ? (
+                    <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+                      {seatEditPreview.stoppedReason}
+                    </div>
+                  ) : (
+                    <div className="px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-500">
+                      Gross subtotal:{' '}
+                      <strong className="text-zinc-800 tabular-nums">
+                        {formatMoney(seatEditPreview.grossSubtotal)}
+                      </strong>{' '}
+                      · No active discount rule matched at current seat count.
+                    </div>
+                  )}
                   <div className="flex justify-end">
                     <Button
                       variant="primary"

@@ -518,6 +518,27 @@ export default function InvoicesPage() {
             {/* Totals Summary */}
             <div className="flex flex-col items-end pt-2">
               <div className="w-56 space-y-1.5 text-xs">
+                {selectedInvoice.discountAmount > 0 && (
+                  <>
+                    <div className="flex justify-between text-slate-500">
+                      <span>Gross Amount:</span>
+                      <span className="tabular-nums font-medium text-[#16233B]">
+                        {formatMoney(selectedInvoice.grossSubtotal)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[#2E7D4F] font-medium">
+                      <span>
+                        Discount (
+                        {selectedInvoice.discountLabel ||
+                          selectedInvoice.discountName}
+                        ):
+                      </span>
+                      <span className="tabular-nums">
+                        -{formatMoney(selectedInvoice.discountAmount)}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-slate-500">
                   <span>Subtotal:</span>
                   <span className="tabular-nums font-medium text-[#16233B]">{formatMoney(selectedInvoice.subtotal)}</span>
