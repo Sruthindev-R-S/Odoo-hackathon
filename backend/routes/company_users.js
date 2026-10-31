@@ -2,12 +2,43 @@ const express = require("express");
 const {
 	createCompanyUser,
 	getCompanyUserByCredentials,
+	acceptEmployee,
 } = require("../models/company_users");
 const { forgotCompanyPassword } = require("../controllers/auth");
 
 const router = express.Router();
 
 router.post("/forgot-password", forgotCompanyPassword);
+
+router.post("/accept-employee", async (req, res) => {
+	const { id } = req.body;
+
+	if (!id) {
+		return res.status(400).json({
+			error: "Company user id is required",
+		});
+	}
+
+	try {
+		const user = await acceptEmployee(id);
+
+		if (!user) {
+			return res.status(404).json({
+				error: "Company user not found",
+			});
+		}
+
+		return res.json({
+			message: "Employee accepted successfully",
+			user,
+		});
+	} catch (error) {
+		console.error("Failed to accept employee:", error);
+		return res.status(500).json({
+			error: "Failed to accept employee",
+		});
+	}
+});
 
 router.post("/register", async (req, res) => {
 	const { name, email, password, role } = req.body;
