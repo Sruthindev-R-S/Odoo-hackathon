@@ -24,7 +24,6 @@ import PlanBadge from '../../components/domain/PlanBadge';
 export default function CustomerBillingPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialPlanId = searchParams.get('planId') || searchParams.get('plan');
 
@@ -98,9 +97,9 @@ export default function CustomerBillingPage() {
   // Update customer fields when user changes
   useEffect(() => {
     if (user) {
-      if (!customerName) setCustomerName(user.name || '');
-      if (!customerEmail) setCustomerEmail(user.email || '');
-      if (!organization) setOrganization(user.organization || '');
+      setCustomerName((prev) => prev || user.name || '');
+      setCustomerEmail((prev) => prev || user.email || '');
+      setOrganization((prev) => prev || user.organization || '');
     }
   }, [user]);
 
