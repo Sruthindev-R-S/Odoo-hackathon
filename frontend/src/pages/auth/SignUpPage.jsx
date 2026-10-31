@@ -97,7 +97,14 @@ export function SignUpPage() {
     try {
       const result = await signUp(formData);
       if (result.success) {
-        navigate('/', { replace: true });
+        const role = result.user?.role;
+        if (role === 'admin') {
+          navigate('/admin', { replace: true });
+        } else if (role === 'staff') {
+          navigate('/staff', { replace: true });
+        } else {
+          navigate('/portal', { replace: true });
+        }
       } else {
         if (result.fieldErrors) {
           setErrors(result.fieldErrors);

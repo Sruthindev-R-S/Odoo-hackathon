@@ -96,6 +96,13 @@ export const authService = {
       };
     }
 
+    if (user.isActive === false) {
+      return {
+        success: false,
+        error: 'This account has been deactivated by an administrator.'
+      };
+    }
+
     const { password: _pw, ...safeUser } = user;
     localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(safeUser));
 
@@ -313,5 +320,157 @@ export const authService = {
   signOut() {
     localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
     return { success: true };
+  },
+
+  async getStaffMembers(actorUser) {
+    await delay(100);
+    if (actorUser && actorUser.role !== 'admin') {
+      return {
+        success: false,
+        error: 'Only administrators are authorized to view staff accounts.'
+      };
+    }
+
+    const users = getStoredUsers();
+    const staff = users
+      .filter((u) => u.role === 'staff')
+      .map(({ password: _pw, ...safeUser }) => safeUser);
+
+    return {
+      success: true,
+      data: staff
+    };
+  },
+
+  async createStaffMember(actorUser, { name, email, title, password }) {
+    await delay(180);
+    if (actorUser && actorUser.role !== 'admin') {
+      return {
+        success: false,
+        error: 'Only administrators can create staff accounts.'
+      };
+    }
+
+    const cleanName = (name || '').trim();
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanTitle = (title || 'Operations Specialist').trim();
+
+    const fieldErrors = {};
+    if (!cleanName) fieldErrors.name = 'Full name is required.';
+    if (!cleanEmail) {
+      fieldErrors.email = 'Work email is required.';
+    } else if (!validateEmailFormat(cleanEmail)) {
+      fieldErrors.email = 'Enter a valid email address.';
+    }
+
+    const pwRules = validatePasswordRules(password);
+    if (!password) {
+      fieldErrors.password = 'Temporary password is required.';
+    } else if (!pwRules.isValid) {
+      fieldErrors.password = 'Password must be over 8 characters with uppercase, lowercase, and special characters.';
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return {
+        success: false,
+        error: 'Please check the highlighted fields.',
+        fieldErrors
+      };
+    }
+
+    const users = getStoredUsers();
+    if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+      return {
+        success: false,
+        error: 'An account with this email address already exists.',
+        fieldErrors: {
+          email: 'This email is already registered.'
+        }
+      };
+    }
+
+    const newStaff = {
+      id: `staff_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: cleanName,
+      email: cleanEmail,
+      password,
+      role: 'staff',
+      title: cleanTitle,
+      isActive: true,
+      organization: actorUser?.organization || 'Brightloop',
+      createdAt: new Date().toISOString()
+    };
+
+    users.unshift(newStaff);
+    saveStoredUsers(users);
+
+    const { password: _pw, ...safeStaff } = newStaff;
+    return {
+      success: true,
+      data: safeStaff
+    };
+  },
+
+  async toggleStaffStatus(actorUser, staffId) {
+    await delay(100);
+    if (actorUser && actorUser.role !== 'admin') {
+      return { success: false, error: 'Unauthorized action.' };
+    }
+
+    const users = getStoredUsers();
+    const idx = users.findIndex((u) => u.id === staffId && u.role === 'staff');
+    if (idx === -1) {
+      return { success: false, error: 'Staff member not found.' };
+    }
+
+    users[idx].isActive = users[idx].isActive === false ? true : false;
+    saveStoredUsers(users);
+
+    const { password: _pw, ...safeStaff } = users[idx];
+    return { success: true, data: safeStaff };
+  },
+
+  async deleteStaffMember(actorUser, staffId) {
+    await delay(100);
+    if (actorUser && actorUser.role !== 'admin') {
+      return { success: false, error: 'Unauthorized action.' };
+    }
+
+    const users = getStoredUsers();
+    const filtered = users.filter((u) => !(u.id === staffId && u.role === 'staff'));
+    saveStoredUsers(filtered);
+    return { success: true };
+  },
+
+  async getCustomers() {
+    await delay(80);
+    const users = getStoredUsers();
+    return users
+      .filter((u) => u.role === 'customer')
+      .map(({ password: _pw, ...safeUser }) => safeUser);
+  },
+
+  updateCurrentUserRole(newRole) {
+    if (!['admin', 'staff', 'customer'].includes(newRole)) {
+      return null;
+    }
+    const current = this.getCurrentUser();
+    if (!current) return null;
+
+    const updatedCurrent = {
+      ...current,
+      role: newRole,
+      customerId: current.customerId || `cust_${current.id}`
+    };
+    localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(updatedCurrent));
+
+    const users = getStoredUsers();
+    const idx = users.findIndex((u) => u.id === current.id || u.email.toLowerCase() === current.email.toLowerCase());
+    if (idx !== -1) {
+      users[idx] = { ...users[idx], role: newRole, customerId: updatedCurrent.customerId };
+      saveStoredUsers(users);
+    }
+
+    return updatedCurrent;
   }
 };

@@ -56,6 +56,14 @@ export function AuthProvider({ children }) {
     return await authService.resetPassword({ token, newPassword, confirmPassword });
   }, []);
 
+  const switchRole = useCallback((newRole) => {
+    const updated = authService.updateCurrentUserRole(newRole);
+    if (updated) {
+      setUser(updated);
+    }
+    return updated;
+  }, []);
+
   const value = {
     user,
     isLoading,
@@ -64,7 +72,8 @@ export function AuthProvider({ children }) {
     signOut,
     requestPasswordReset,
     validateResetToken,
-    resetPassword
+    resetPassword,
+    switchRole
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

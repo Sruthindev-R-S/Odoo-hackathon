@@ -5,44 +5,105 @@ import {
   LayoutDashboard,
   Package,
   CalendarDays,
+  Receipt,
+  Repeat,
+  FileText,
+  Users,
+  BookOpen,
   LogOut,
   Menu,
   X,
   Shield,
   ChevronRight,
-  Receipt,
 } from 'lucide-react';
 
-export default function AppLayout({ currentTab, onNavigate, children }) {
+const ADMIN_NAV_ITEMS = [
+  {
+    id: 'dashboard',
+    label: 'Admin Overview',
+    icon: LayoutDashboard,
+    group: 'Catalog & System',
+  },
+  {
+    id: 'products',
+    label: 'Products & Variants',
+    icon: Package,
+    group: 'Catalog & System',
+  },
+  {
+    id: 'plans',
+    label: 'Subscription Plans',
+    icon: CalendarDays,
+    group: 'Catalog & System',
+  },
+  {
+    id: 'billing',
+    label: 'Customer Billing',
+    icon: Receipt,
+    group: 'Operations',
+  },
+  {
+    id: 'subscriptions',
+    label: 'Subscriptions',
+    icon: Repeat,
+    group: 'Operations',
+  },
+  {
+    id: 'invoices',
+    label: 'Invoices & Billing',
+    icon: FileText,
+    group: 'Operations',
+  },
+  {
+    id: 'staff',
+    label: 'Staff Members',
+    icon: Users,
+    group: 'Administration',
+  },
+];
+
+const STAFF_NAV_ITEMS = [
+  {
+    id: 'dashboard',
+    label: 'Operations Overview',
+    icon: LayoutDashboard,
+    group: 'Daily Operations',
+  },
+  {
+    id: 'subscriptions',
+    label: 'Subscriptions',
+    icon: Repeat,
+    group: 'Daily Operations',
+  },
+  {
+    id: 'invoices',
+    label: 'Invoices & Billing',
+    icon: FileText,
+    group: 'Daily Operations',
+  },
+  {
+    id: 'catalog',
+    label: 'Catalog (View Only)',
+    icon: BookOpen,
+    group: 'Reference',
+  },
+];
+
+export default function AppLayout({
+  currentTab,
+  onNavigate,
+  workspaceRole = 'admin',
+  children,
+}) {
   const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const navigationItems = [
-    {
-      id: 'dashboard',
-      label: 'Admin Overview',
-      icon: LayoutDashboard,
-      description: 'Catalog summary and stats',
-    },
-    {
-      id: 'products',
-      label: 'Products & Variants',
-      icon: Package,
-      description: 'Catalog items, margins & variants',
-    },
-    {
-      id: 'plans',
-      label: 'Subscription Plans',
-      icon: CalendarDays,
-      description: 'Pricing tiers & recurrence rules',
-    },
-    {
-      id: 'billing',
-      label: 'Customer Billing',
-      icon: Receipt,
-      description: 'Customer plan selection and checkout',
-    },
-  ];
+  const isStaffWorkspace = workspaceRole === 'staff';
+  const navigationItems = isStaffWorkspace ? STAFF_NAV_ITEMS : ADMIN_NAV_ITEMS;
+
+  const groups = Array.from(new Set(navigationItems.map((i) => i.group)));
+  const activeItem =
+    navigationItems.find((i) => i.id === currentTab) || navigationItems[0];
 
   const handleNavClick = (id) => {
     onNavigate(id);
@@ -57,7 +118,9 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
           <div className="w-8 h-8 rounded-lg bg-zinc-900 text-white flex items-center justify-center font-bold">
             <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full transform -rotate-45" />
           </div>
-          <span className="font-bold text-base tracking-tight text-zinc-900">Brightloop</span>
+          <span className="font-bold text-base tracking-tight text-zinc-900">
+            Brightloop
+          </span>
         </div>
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -67,7 +130,7 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
         </button>
       </div>
 
-      {/* Sidebar (Desktop & Mobile drawer) */}
+      {/* Sidebar */}
       <aside
         className={`${
           mobileMenuOpen ? 'block' : 'hidden'
@@ -83,54 +146,70 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
               Brightloop
             </div>
             <div className="text-[11px] text-zinc-500 font-medium tracking-wide uppercase">
-              Subscription Management
+              {isStaffWorkspace ? 'Staff Operations' : 'Subscription Management'}
             </div>
           </div>
         </div>
 
-        {/* Navigation List */}
-        <div className="flex-1 px-3 py-6 space-y-1.5">
-          <div className="px-3 pb-2 text-[10px] uppercase font-bold tracking-wider text-zinc-400">
-            Catalog Administration
-          </div>
-          {navigationItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = currentTab === item.id;
+        {/* Navigation Groups */}
+        <div className="flex-1 px-3 py-5 space-y-5 overflow-y-auto">
+          {groups.map((groupName) => (
+            <div key={groupName} className="space-y-1">
+              <div className="px-3 pb-1 text-[10px] uppercase font-bold tracking-wider text-zinc-400">
+                {groupName}
+              </div>
+              {navigationItems
+                .filter((item) => item.group === groupName)
+                .map((item) => {
+                  const Icon = item.icon;
+                  const isActive = currentTab === item.id;
 
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleNavClick(item.id)}
-                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
-                  isActive
-                    ? 'bg-zinc-900 text-white shadow-xs'
-                    : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-zinc-500'}`} />
-                <span className="flex-1">{item.label}</span>
-                {isActive && <ChevronRight className="w-4 h-4 text-zinc-400" />}
-              </button>
-            );
-          })}
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleNavClick(item.id)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+                        isActive
+                          ? 'bg-zinc-900 text-white shadow-xs'
+                          : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+                      }`}
+                    >
+                      <Icon
+                        className={`w-4 h-4 ${
+                          isActive ? 'text-white' : 'text-zinc-500'
+                        }`}
+                      />
+                      <span className="flex-1">{item.label}</span>
+                      {isActive && (
+                        <ChevronRight className="w-4 h-4 text-zinc-400" />
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+          ))}
         </div>
 
         {/* User Info & Logout footer */}
         <div className="p-4 border-t border-zinc-200 bg-zinc-50">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 rounded-full bg-zinc-200 text-zinc-800 flex items-center justify-center font-bold text-xs uppercase">
-              {user?.name ? user.name.substring(0, 2) : 'AD'}
+              {user?.name
+                ? user.name.substring(0, 2)
+                : isStaffWorkspace
+                ? 'ST'
+                : 'AD'}
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-zinc-900 truncate">
-                {user?.name || 'Administrator'}
+                {user?.name || (isStaffWorkspace ? 'Operations Staff' : 'Administrator')}
               </div>
               <div className="text-[11px] text-zinc-500 truncate">
-                {user?.email || 'admin@brightloop.com'}
+                {user?.email || (isStaffWorkspace ? 'staff@brightloop.com' : 'Not signed in')}
               </div>
             </div>
             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-zinc-900 text-white">
-              Admin
+              {isStaffWorkspace ? 'Staff' : 'Admin'}
             </span>
           </div>
 
@@ -142,7 +221,13 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
               Account
             </Link>
             <button
-              onClick={user ? signOut : () => { window.location.href = '/signin'; }}
+              onClick={
+                user
+                  ? signOut
+                  : () => {
+                      window.location.href = '/signin';
+                    }
+              }
               className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs text-zinc-700 hover:text-zinc-900 hover:bg-zinc-200/60 rounded-md transition-colors border border-zinc-200 bg-white font-medium"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -157,21 +242,23 @@ export default function AppLayout({ currentTab, onNavigate, children }) {
         {/* Top Header */}
         <header className="hidden md:flex items-center justify-between px-8 py-4 bg-white border-b border-zinc-200">
           <div className="flex items-center gap-2 text-sm text-zinc-500">
-            <span className="font-medium text-zinc-700">Admin Workspace</span>
+            <span className="font-medium text-zinc-700">
+              {isStaffWorkspace ? 'Staff Workspace' : 'Admin Workspace'}
+            </span>
             <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
-            <span className="font-semibold text-zinc-900 capitalize">
-              {currentTab === 'dashboard'
-                ? 'Overview'
-                : currentTab === 'products'
-                ? 'Products & Variants'
-                : 'Subscription Plans'}
+            <span className="font-semibold text-zinc-900">
+              {activeItem?.label || 'Overview'}
             </span>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 bg-zinc-100 px-3 py-1.5 rounded-full border border-zinc-200">
               <Shield className="w-3.5 h-3.5 text-zinc-900" />
-              Role: <strong className="text-zinc-900">Administrator</strong> (Full Catalog Access)
+              Role:{' '}
+              <strong className="text-zinc-900">
+                {isStaffWorkspace ? 'Staff' : 'Administrator'}
+              </strong>{' '}
+              ({isStaffWorkspace ? 'Operations Access' : 'Full System Access'})
             </div>
           </div>
         </header>

@@ -4,9 +4,4 @@ dist/
 *.log
 .DS_Store
 
-# Dashboard pages
-frontend/src/pages/admin/
-frontend/src/pages/staff/
-frontend/src/pages/customer/
-frontend/src/pages/dashboard/
 

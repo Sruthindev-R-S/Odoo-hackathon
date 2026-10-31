@@ -39,7 +39,14 @@ export function SignInPage() {
     try {
       const result = await signIn(formData);
       if (result.success) {
-        navigate('/', { replace: true });
+        const role = result.user?.role;
+        if (role === 'admin') {
+          navigate('/admin', { replace: true });
+        } else if (role === 'staff') {
+          navigate('/staff', { replace: true });
+        } else {
+          navigate('/portal', { replace: true });
+        }
       } else {
         setError(result.error || 'Invalid credentials.');
       }
