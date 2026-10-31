@@ -190,6 +190,8 @@ Status: Periodic Feature Progress & Roadmap Tracker
 --------------------------------------------------------------------------------
 5. REVISION & UPDATE LOG
 --------------------------------------------------------------------------------
+- 2026-10-31 15:06 IST: Pushed refined 'The Money Comes In' features to origin/main
+  (commit ca56703) with routes /money, /collections, and invoice cross-linking.
 - 2026-10-31 14:44 IST: Pulled latest changes from origin/main (commit 560c4a0).
   Added Customer seat updates, automated volume discounts at checkout, live seat
   discount preview on invoice runs, multi-product targeting, and rule expiry locking.
