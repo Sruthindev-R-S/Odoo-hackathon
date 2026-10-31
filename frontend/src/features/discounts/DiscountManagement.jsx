@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tag, Plus, Pencil, Trash2, Power } from 'lucide-react';
+import { Tag, Plus, Pencil, Trash2, Power, Check } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
   discountService,
@@ -10,6 +10,7 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Badge from '../../components/ui/Badge';
+import Card from '../../components/ui/Card';
 import Drawer from '../../components/ui/Drawer';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
@@ -35,7 +36,7 @@ export default function DiscountManagement() {
     type: 'percentage',
     value: '10',
     appliesTo: 'subscription',
-    productId: '',
+    productIds: [],
     minQuantity: '1',
     minPurchase: '0',
     startDate: today,
@@ -69,7 +70,7 @@ export default function DiscountManagement() {
       type: 'percentage',
       value: '10',
       appliesTo: 'subscription',
-      productId: products[0]?.id || '',
+      productIds: products[0]?.id ? [products[0].id] : [],
       minQuantity: '5',
       minPurchase: '0',
       startDate: today,
@@ -82,12 +83,20 @@ export default function DiscountManagement() {
 
   const openEditDrawer = (rule) => {
     setEditingRule(rule);
+    const existingIds =
+      Array.isArray(rule.productIds) && rule.productIds.length > 0
+        ? rule.productIds
+        : rule.productId
+        ? [rule.productId]
+        : products[0]?.id
+        ? [products[0].id]
+        : [];
     setFormData({
       name: rule.name || '',
       type: rule.type || 'percentage',
       value: String(rule.value ?? ''),
       appliesTo: rule.appliesTo || 'subscription',
-      productId: rule.productId || products[0]?.id || '',
+      productIds: existingIds,
       minQuantity: String(rule.minQuantity ?? 0),
       minPurchase: String(rule.minPurchase ?? 0),
       startDate: rule.startDate || '',
@@ -103,6 +112,16 @@ export default function DiscountManagement() {
     setDrawerOpen(true);
   };
 
+  const handleToggleProductId = (prodId) => {
+    setFormData((prev) => {
+      const exists = prev.productIds.includes(prodId);
+      const nextIds = exists
+        ? prev.productIds.filter((id) => id !== prodId)
+        : [...prev.productIds, prodId];
+      return { ...prev, productIds: nextIds };
+    });
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     const nextErrors = {};
@@ -115,8 +134,11 @@ export default function DiscountManagement() {
     } else if (formData.type === 'percentage' && val > 100) {
       nextErrors.value = 'Percentage cannot exceed 100%.';
     }
-    if (formData.appliesTo === 'product' && !formData.productId) {
-      nextErrors.productId = 'Select a target product.';
+    if (
+      formData.appliesTo === 'product' &&
+      (!formData.productIds || formData.productIds.length === 0)
+    ) {
+      nextErrors.productIds = 'Select at least one specific product.';
     }
     if (
       formData.startDate &&
@@ -131,17 +153,24 @@ export default function DiscountManagement() {
       return;
     }
 
-    const pickedProd = products.find((p) => p.id === formData.productId);
+    const pickedProducts = products.filter((p) =>
+      formData.productIds.includes(p.id)
+    );
+    const productSummary =
+      pickedProducts.length > 0
+        ? pickedProducts.map((p) => p.name).join(', ')
+        : 'Specific Products';
+
     const payload = {
       name: formData.name.trim(),
       type: formData.type,
       value: val,
       appliesTo: formData.appliesTo,
-      productId: formData.appliesTo === 'product' ? formData.productId : '',
+      productId:
+        formData.appliesTo === 'product' ? formData.productIds[0] || '' : '',
+      productIds: formData.appliesTo === 'product' ? formData.productIds : [],
       productName:
-        formData.appliesTo === 'product'
-          ? pickedProd?.name || 'Specific Product'
-          : 'Whole Subscription',
+        formData.appliesTo === 'product' ? productSummary : 'Whole Subscription',
       minQuantity: Math.max(0, Number(formData.minQuantity) || 0),
       minPurchase: Math.max(0, Number(formData.minPurchase) || 0),
       startDate: formData.startDate || '',
@@ -232,6 +261,18 @@ export default function DiscountManagement() {
     );
   };
 
+  const activeCount = rules.filter(
+    (r) => getDiscountRuleStatus(r, today) === 'active'
+  ).length;
+  const totalUses = rules.reduce(
+    (sum, r) => sum + (Number(r.usedCount) || 0),
+    0
+  );
+  const stoppedCount = rules.filter((r) => {
+    const st = getDiscountRuleStatus(r, today);
+    return st === 'expired' || st === 'exhausted';
+  }).length;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -241,12 +282,49 @@ export default function DiscountManagement() {
             Discount Rules
           </h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Configure percentage or fixed discounts with seat/purchase thresholds, validity dates, and usage limits. Applied automatically on invoices until expired or exhausted.
+            Administrator-only fixed or percentage discounts with minimum seat/purchase thresholds, validity dates, and usage limits. Applied automatically on invoices until expired or exhausted.
           </p>
         </div>
         <Button variant="primary" icon={Plus} onClick={openCreateDrawer}>
           New Discount Rule
         </Button>
+      </div>
+
+      {/* KPI Strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="p-4 bg-white border-zinc-200">
+          <div className="text-xs font-medium text-zinc-500">
+            Active Discount Rules
+          </div>
+          <div className="text-2xl font-bold text-zinc-900 mt-1 tabular-nums">
+            {activeCount}
+          </div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">
+            Automatically evaluated on subscriptions & invoices
+          </div>
+        </Card>
+        <Card className="p-4 bg-white border-zinc-200">
+          <div className="text-xs font-medium text-zinc-500">
+            Invoices Discounted
+          </div>
+          <div className="text-2xl font-bold text-zinc-900 mt-1 tabular-nums">
+            {totalUses}
+          </div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">
+            Total automatic redemptions across billing runs
+          </div>
+        </Card>
+        <Card className="p-4 bg-white border-zinc-200">
+          <div className="text-xs font-medium text-zinc-500">
+            Auto-Stopped (Expired / Limit Reached)
+          </div>
+          <div className="text-2xl font-bold text-zinc-900 mt-1 tabular-nums">
+            {stoppedCount}
+          </div>
+          <div className="text-[11px] text-zinc-400 mt-0.5">
+            Stopped automatically without manual removal
+          </div>
+        </Card>
       </div>
 
       {/* Rules Table */}
@@ -274,7 +352,7 @@ export default function DiscountManagement() {
                   <th className="py-3 px-4">Applies To</th>
                   <th className="py-3 px-4">Minimums</th>
                   <th className="py-3 px-4">Valid Dates</th>
-                  <th className="py-3 px-4">Usage</th>
+                  <th className="py-3 px-4">Usage Limit</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -290,10 +368,13 @@ export default function DiscountManagement() {
                         ? `${rule.value}% Off`
                         : `${formatMoney(rule.value)} Off`}
                     </td>
-                    <td className="py-3.5 px-4 text-xs text-zinc-700">
+                    <td className="py-3.5 px-4 text-xs text-zinc-700 max-w-56">
                       {rule.appliesTo === 'product' ? (
                         <span>
-                          Product: <strong className="text-zinc-900">{rule.productName}</strong>
+                          Products:{' '}
+                          <strong className="text-zinc-900">
+                            {rule.productName}
+                          </strong>
                         </span>
                       ) : (
                         'Whole Subscription'
@@ -387,7 +468,7 @@ export default function DiscountManagement() {
           <Input
             label="Rule Name"
             required
-            placeholder="e.g. Multi-Seat Expansion 15% Off"
+            placeholder="e.g. 10+ Seats Expansion 15% Off"
             value={formData.name}
             error={errors.name}
             onChange={(e) =>
@@ -435,7 +516,7 @@ export default function DiscountManagement() {
               value={formData.appliesTo}
               options={[
                 { value: 'subscription', label: 'Whole Subscription' },
-                { value: 'product', label: 'Specific Product' },
+                { value: 'product', label: 'Specific Products' },
               ]}
               onChange={(e) =>
                 setFormData((p) => ({ ...p, appliesTo: e.target.value }))
@@ -443,20 +524,47 @@ export default function DiscountManagement() {
             />
 
             {formData.appliesTo === 'product' && (
-              <Select
-                label="Target Product"
-                required
-                placeholder="Select product"
-                value={formData.productId}
-                error={errors.productId}
-                options={products.map((p) => ({
-                  value: p.id,
-                  label: p.name,
-                }))}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, productId: e.target.value }))
-                }
-              />
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-zinc-800">
+                  Target Specific Products <span className="text-red-500">*</span>
+                </div>
+                {errors.productIds && (
+                  <p className="text-xs font-medium text-red-600">
+                    {errors.productIds}
+                  </p>
+                )}
+                <div className="border border-zinc-200 rounded-xl divide-y divide-zinc-200 bg-white max-h-48 overflow-y-auto">
+                  {products.map((p) => {
+                    const checked = formData.productIds.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => handleToggleProductId(p.id)}
+                        className="w-full px-3.5 py-2.5 flex items-center justify-between text-left text-xs hover:bg-zinc-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`w-4 h-4 rounded border flex items-center justify-center ${
+                              checked
+                                ? 'bg-zinc-900 border-zinc-900 text-white'
+                                : 'border-zinc-300 bg-white'
+                            }`}
+                          >
+                            {checked && <Check className="w-3 h-3" />}
+                          </span>
+                          <span className="font-medium text-zinc-900">
+                            {p.name}
+                          </span>
+                        </div>
+                        <span className="text-zinc-500 tabular-nums">
+                          {formatMoney(p.salesPrice)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -508,12 +616,12 @@ export default function DiscountManagement() {
             </div>
 
             <Input
-              label="Usage Limit (Max Invoices)"
+              label="Usage Limit (Max Times Used)"
               type="number"
               min="1"
               placeholder="Leave blank for unlimited uses"
               value={formData.usageLimit}
-              hint="Stops automatically once used this many times"
+              hint="Stops automatically once applied this many times across invoices"
               onChange={(e) =>
                 setFormData((p) => ({ ...p, usageLimit: e.target.value }))
               }

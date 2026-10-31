@@ -398,7 +398,11 @@ export default function StaffCatalogView() {
                         </td>
                         <td className="py-3.5 px-4 text-xs text-zinc-700">
                           {dr.appliesTo === 'product'
-                            ? `Product: ${dr.productName}`
+                            ? `${
+                                (dr.productIds || []).length > 1
+                                  ? 'Products'
+                                  : 'Product'
+                              }: ${dr.productName}`
                             : 'Whole Subscription'}
                         </td>
                         <td className="py-3.5 px-4 text-xs text-zinc-600 tabular-nums">

@@ -15,14 +15,20 @@ import Button from '../../components/ui/Button';
 import { useProducts } from '../products/useProducts';
 import { usePlans } from '../plans/usePlans';
 import { taxService } from '../../api/services/taxService';
+import {
+  discountService,
+  getDiscountRuleStatus,
+} from '../../api/services/discountService';
 
 export default function AdminDashboard({ onNavigate }) {
   const { products } = useProducts();
   const { plans } = usePlans();
   const [taxRules, setTaxRules] = useState([]);
+  const [discountRules, setDiscountRules] = useState([]);
 
   useEffect(() => {
     taxService.getTaxRules().then(setTaxRules);
+    discountService.getDiscountRules().then(setDiscountRules);
   }, []);
 
   const totalVariants = products.reduce(
@@ -30,6 +36,9 @@ export default function AdminDashboard({ onNavigate }) {
     0
   );
   const activeTaxRules = taxRules.filter((r) => r.isActive !== false);
+  const activeDiscountRules = discountRules.filter(
+    (r) => getDiscountRuleStatus(r) === 'active'
+  );
 
   return (
     <div className="space-y-8">
@@ -65,6 +74,13 @@ export default function AdminDashboard({ onNavigate }) {
           </Button>
           <Button
             variant="secondary"
+            icon={Tag}
+            onClick={() => onNavigate('discounts')}
+          >
+            Discount Rules
+          </Button>
+          <Button
+            variant="secondary"
             icon={CalendarDays}
             onClick={() => onNavigate('plans')}
           >
@@ -74,7 +90,7 @@ export default function AdminDashboard({ onNavigate }) {
       </div>
 
       {/* KPI Stats Overview */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Products KPI */}
         <Card
           hoverable
@@ -146,6 +162,31 @@ export default function AdminDashboard({ onNavigate }) {
             </div>
             <p className="text-xs text-zinc-400 mt-1">
               Adjustable brand and tier price add-ons
+            </p>
+          </div>
+        </Card>
+
+        {/* Discount Rules KPI */}
+        <Card
+          hoverable
+          onClick={() => onNavigate('discounts')}
+          className="p-6 cursor-pointer border-zinc-200 hover:border-zinc-400 bg-white"
+        >
+          <div className="flex items-center justify-between">
+            <div className="w-10 h-10 rounded-lg bg-zinc-100 text-zinc-900 border border-zinc-200 flex items-center justify-center font-bold">
+              <Tag className="w-5 h-5" />
+            </div>
+            <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-zinc-900" />
+          </div>
+          <div className="mt-4">
+            <div className="text-2xl font-bold text-zinc-900 tabular-nums">
+              {activeDiscountRules.length}
+            </div>
+            <div className="text-sm font-semibold text-zinc-700 mt-0.5">
+              Active Discount Rules
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              Auto-applied volume & subscription discounts
             </p>
           </div>
         </Card>
