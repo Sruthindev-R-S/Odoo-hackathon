@@ -1,0 +1,203 @@
+================================================================================
+BRIGHTLOOP SUBSCRIPTION MANAGEMENT SYSTEM - FEATURES TRACKER
+================================================================================
+Project: Brightloop Software Subscription Management System
+Repository: https://github.com/Sruthindev-R-S/Odoo-hackathon
+Last Updated: 2026-10-31 13:35 IST
+Status: Periodic Feature Progress & Roadmap Tracker
+
+--------------------------------------------------------------------------------
+1. FULLY IMPLEMENTED FEATURES (COMPLETED & VERIFIED)
+--------------------------------------------------------------------------------
+
+[AUTH & ACCESS CONTROL]
+[x] Customer Sign-up (/signup)
+    - Live password security checklist (min 9 chars, uppercase, lowercase, special char)
+    - Duplicate email detection & validation
+[x] User Sign-in (/signin)
+    - Role-based automatic redirect (Admin -> /dashboard, Staff -> /staff, Customer -> /portal)
+[x] Password Reset Request (/forgot-password)
+    - Safe neutral confirmation message
+[x] Password Reset Execution (/reset-password)
+    - Token extraction from URL with live password checklist validation
+[x] Route Guards & Access Control
+    - RequireAdmin and RequireRole components protecting internal workflows
+[x] Role Switcher & Account Overview (/account)
+    - One-click testing switcher between Admin, Staff, and Customer workspaces
+[x] Admin Staff Management (/settings/staff, /admin/staff)
+    - Admin-only staff account creation with name, email, and temporary password
+    - Staff directory listing with Active / Inactive status toggle
+
+[CATALOG & CONFIGURATION]
+[x] Products Management (/products, /settings/products)
+    - Product list with search and product type filtering
+    - Create/edit drawer (name, type, sales price, cost price, description/notes)
+    - Live profit and gross margin calculation
+    - Admin edit access, Staff view-only mode (/staff catalog tab)
+[x] Product Variants Editor
+    - Dynamic attribute/value configuration (e.g., Brand -> Odoo)
+    - Price adjustments (e.g., Odoo Brand +₹560 extra price)
+    - Live effective price calculation (Base Price + Variant Extra)
+[x] Subscription Plans (/plans, /settings/plans)
+    - Create and edit subscription plans (name, base price, billing interval)
+    - Billing intervals: Daily, Weekly, Monthly, Yearly
+    - Minimum quantity validation
+    - Availability validity window (availableFrom and availableTo dates)
+    - Availability state computation (Active, Upcoming, Expired)
+    - Four behavioral control switches:
+      1. Closes automatically when it ends
+      2. Can be closed early
+      3. Can be paused
+      4. Can be renewed
+[x] Automated Taxes Management (/taxes, /settings/taxes)
+    - Create and edit automated tax rules (name, percentage rate, application scope)
+    - Scope configuration: All Products, Product Type, or Specific Product
+    - Automated tax computation and line item integration in invoices
+
+[CUSTOMER PORTAL & BILLING]
+[x] Customer Plan Selection & Checkout (/billing, /portal/billing, /checkout)
+    - Visual plan selection with billing period indicators
+    - Add-on variant selection with live total updates
+    - Real-time tax computation and order summary preview
+    - Checkout confirmation creating active customer subscription and first invoice
+[x] Customer Self-Service Portal (/portal)
+    - Overview tab: Active subscriptions count, next invoice date, outstanding balance
+    - My Subscriptions: View plan details, status badges, renewal dates
+    - Self-service subscription controls (Pause, Resume, Renew, Close) strictly
+      constrained by plan behavior switches
+    - My Invoices: View invoices, status badges, payment instructions, printable invoice view
+    - Pay Now flow modal for outstanding invoices
+
+[OPERATIONS, SUBSCRIPTIONS & INVOICES]
+[x] Internal Subscription Management (/staff, /admin, tab=subscriptions)
+    - Status tabs with real-time counts: All, Draft, Quotation, Confirmed, Active, Closed
+    - StatusStepper visual component displaying lifecycle progression and completed dates
+    - Action buttons strictly constrained by subscription status and plan flags:
+      * Draft: Edit, Send Quotation, Discard
+      * Quotation: Confirm, Edit, Discard
+      * Confirmed: Activate
+      * Active: Pause, Resume, Renew, Close
+      * Closed: Read-only audit state
+    - Create subscription drawer with searchable customer, plan, and product lines
+    - Detail drawer with full audit history timeline and linked invoices
+[x] Invoice Management (/invoices, tab=invoices)
+    - Status tabs with real-time counts: All, Draft, Outstanding (confirmed), Paid, Overdue
+    - Lifecycle transitions: Draft -> Confirmed -> Paid (or Cancelled)
+    - Actions: Confirm invoice, Send invoice, Print/PDF invoice, Cancel invoice
+    - Overdue tracking with dynamic day calculation (e.g., "X days overdue")
+    - Printable layout with company branding and tax breakdown
+[x] Automated Recurring Billing Runs (/billing-runs)
+    - "Run Billing" execution trigger with confirmation dialog
+    - Automatic invoice generation for subscriptions due on or before today
+    - Duplicate billing prevention with detailed run statistics:
+      * Invoices Created
+      * Subscriptions Skipped (already billed for current period)
+      * Failed runs
+    - Historical billing run audit log table
+[x] Payments Management (/payments, tab=payments)
+    - Record payment modal from invoice detail or payments tab
+    - Payment methods supported: Bank Wire / NEFT, UPI / Instant Transfer,
+      Credit Card (POS), Corporate Cheque, Cash / Direct Deposit
+    - Automatic invoice status transition to Paid when fully settled
+    - Filterable payments history by method, date range, and customer
+
+[UI DESIGN SYSTEM & PERFORMANCE]
+[x] Clean, high-contrast, black-and-white SaaS visual styling
+[x] Tabular numerals (tabular-nums) for all currency and financial figures
+[x] Single source of truth formatting helpers (formatMoney, formatDate, getDueStatus)
+[x] Fast load times and sub-second builds with Vite bundle optimization
+
+
+--------------------------------------------------------------------------------
+2. PARTIALLY IMPLEMENTED / IN-PROGRESS FEATURES
+--------------------------------------------------------------------------------
+
+[~] Executive Dashboard Analytics & Reporting (/dashboard)
+    - CURRENT: Metric cards for catalog items, tax rules, and recent operational stats.
+    - PENDING: MRR (Monthly Recurring Revenue), ARR, Revenue Collected vs Outstanding,
+      and financial breakdown charts (Revenue by month, payments by method).
+[~] Backend API Live Adapter Sync
+    - CURRENT: LocalStorage-backed reactive service layer (operationsService,
+      productService, planService, taxService, billingService) enabling instant demo.
+    - PENDING: Swapping endpoint URLs to live backend REST routes as the teammate
+      completes backend controllers.
+
+
+--------------------------------------------------------------------------------
+3. FEATURES YET TO BE DONE (PENDING SCOPE)
+--------------------------------------------------------------------------------
+
+[ ] 3.1 Discounts Management System (/settings/discounts)
+    - Admin discount rule configuration interface
+    - Discount kinds: Fixed Amount or Percentage
+    - Rule properties:
+      * Name and code
+      * Discount value (percentage 0-100% or fixed currency amount)
+      * Minimum purchase amount and minimum quantity requirements
+      * Start and end validity dates
+      * Usage limits with live usage counter (used_count / usage_limit)
+      * Applicability scope: Specific Products (multi-select) or Whole Subscription
+    - Computed state badges: Scheduled, Active, Expired, Used Up
+    - Automated application: Applied discounts appear as negative lines on invoices
+      with zero manual user entry required
+
+[ ] 3.2 Quotation Templates (/templates)
+    - Admin/Staff quotation template builder
+    - Template fields: Name, validity duration in days, default plan, payment terms,
+      pre-configured product lines (product, variant, default quantity)
+    - "Create Quotation from Template" action: opens new subscription form prefilled
+      from the selected template
+
+[ ] 3.3 Dedicated Customers Directory (/customers, /customers/:id)
+    - Comprehensive searchable customer directory for Admin and Staff
+    - Customer profile detail view with 4 organized tabs:
+      1. Overview (contact details, company info, lifetime value)
+      2. Subscriptions (all active and historical subscriptions)
+      3. Invoices (outstanding, paid, overdue history)
+      4. Payments (reconciliation history)
+    - Customer edit and manual customer creation form
+
+[ ] 3.4 Overdue Invoices & Dunning Report (/reports/overdue)
+    - Dedicated finance view sorting overdue invoices by days past due
+    - Customer contact information at a glance
+    - One-click "Send Payment Reminder" action for staff
+
+[ ] 3.5 CSV Data Export
+    - Client-side CSV export functionality across all data tables:
+      * Subscriptions export
+      * Invoices export
+      * Payments ledger export
+      * Customers list export
+
+[ ] 3.6 Automated Quotation Expiry Enforcement
+    - Automatic blocking of confirmation when quotation date exceeds template validity
+
+
+--------------------------------------------------------------------------------
+4. ACCEPTANCE CRITERIA STATUS CHECKLIST
+--------------------------------------------------------------------------------
+
+[x] Password policy (min 9 chars, upper, lower, special) with live checklist
+[x] Email uniqueness validation
+[x] Admin can add staff; staff cannot access staff administration (hidden/blocked)
+[x] Customer lands in portal and cannot access internal admin/staff routes
+[x] Variant pricing (e.g. Odoo brand +560) reflected in live effective price
+[x] Plan configuration captures interval, min qty, validity, and 4 behavior toggles
+[x] Subscription lifecycle stepper displays Draft -> Quotation -> Confirmed -> Active -> Closed
+[x] Allowed buttons match current status and plan flags (no invalid transitions)
+[x] Run billing generates invoices for subscriptions due today
+[x] Duplicate billing prevention verified (re-running shows 0 created, skips logged)
+[x] Invoice confirm, cancel, send, and print workflows operational
+[x] Payment recording updates invoice status to Paid and logs payment record
+[ ] Discount rule management with automatic invoice deduction line
+[ ] Quotation template creation and prefilled quote generation
+[ ] Dedicated customer detail view with linked subscriptions, invoices, and payments
+[ ] CSV export on tables
+
+
+--------------------------------------------------------------------------------
+5. REVISION & UPDATE LOG
+--------------------------------------------------------------------------------
+- 2026-10-31 13:35 IST: Initial comprehensive feature tracker created following
+  successful merge and push of billing runs and invoice views to origin/main.
+================================================================================

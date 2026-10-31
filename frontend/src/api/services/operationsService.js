@@ -1053,4 +1053,144 @@ export const operationsService = {
     saveUnifiedInvoices(invoices, subs);
     return inv;
   },
+
+  /**
+   * Fetch all recorded payments across invoices with customer & invoice associations
+   */
+  async getPayments(filters = {}, actorUser) {
+    await new Promise((r) => setTimeout(r, 60));
+    const subs = readUnifiedSubscriptions();
+    const invoices = readUnifiedInvoices(subs);
+
+    const scopedInvoices =
+      actorUser?.role === 'customer'
+        ? invoices.filter((i) => belongsToCustomer(i, actorUser))
+        : invoices;
+
+    const allPayments = [];
+    scopedInvoices.forEach((inv) => {
+      if (Array.isArray(inv.payments)) {
+        inv.payments.forEach((p) => {
+          allPayments.push({
+            ...p,
+            invoiceId: inv.id,
+            invoiceNumber: inv.invoiceNumber,
+            customerId: inv.customerId,
+            customerName: inv.customerName,
+            customerEmail: inv.customerEmail,
+            organization: inv.organization,
+            subscriptionNumber: inv.subscriptionNumber,
+            invoiceTotal: inv.total,
+            invoiceStatus: inv.status,
+            invoiceAmountDue: inv.amountDue,
+          });
+        });
+      }
+    });
+
+    // Sort newest first
+    allPayments.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+
+    // Apply filtering
+    const { method, search, fromDate, toDate } = filters;
+    return allPayments.filter((p) => {
+      if (method && method !== 'all' && p.method !== method) {
+        return false;
+      }
+      if (fromDate && p.date && p.date < fromDate) {
+        return false;
+      }
+      if (toDate && p.date && p.date > toDate) {
+        return false;
+      }
+      if (search && search.trim()) {
+        const q = search.trim().toLowerCase();
+        const matchesInv = p.invoiceNumber?.toLowerCase().includes(q);
+        const matchesCust = p.customerName?.toLowerCase().includes(q);
+        const matchesOrg = p.organization?.toLowerCase().includes(q);
+        const matchesNote = p.note?.toLowerCase().includes(q);
+        const matchesMethod = p.method?.toLowerCase().includes(q);
+        const matchesId = p.id?.toLowerCase().includes(q);
+        if (!matchesInv && !matchesCust && !matchesOrg && !matchesNote && !matchesMethod && !matchesId) {
+          return false;
+        }
+      }
+      return true;
+    });
+  },
+
+  /**
+   * Get payments & receivables summary for "The money comes in" overview
+   */
+  async getPaymentSummary(actorUser) {
+    await new Promise((r) => setTimeout(r, 40));
+    const subs = readUnifiedSubscriptions();
+    const invoices = readUnifiedInvoices(subs);
+
+    const scopedInvoices =
+      actorUser?.role === 'customer'
+        ? invoices.filter((i) => belongsToCustomer(i, actorUser))
+        : invoices;
+
+    let totalCollected = 0;
+    let totalOutstanding = 0;
+    let overdueAmount = 0;
+    let overdueCount = 0;
+    let paymentCount = 0;
+    let confirmedCount = 0;
+    let paidCount = 0;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    scopedInvoices.forEach((inv) => {
+      if (inv.status === 'paid') {
+        paidCount++;
+      }
+      if (inv.status === 'confirmed') {
+        confirmedCount++;
+        totalOutstanding += inv.amountDue || 0;
+        if (inv.dueDate && inv.dueDate < todayStr && (inv.amountDue || 0) > 0) {
+          overdueCount++;
+          overdueAmount += inv.amountDue || 0;
+        }
+      }
+      if (Array.isArray(inv.payments)) {
+        inv.payments.forEach((p) => {
+          paymentCount++;
+          totalCollected += Number(p.amount) || 0;
+        });
+      }
+    });
+
+    return {
+      totalCollected: Math.round(totalCollected * 100) / 100,
+      totalOutstanding: Math.round(totalOutstanding * 100) / 100,
+      overdueAmount: Math.round(overdueAmount * 100) / 100,
+      overdueCount,
+      paymentCount,
+      confirmedCount,
+      paidCount,
+      totalInvoices: scopedInvoices.length,
+    };
+  },
+
+  /**
+   * Send payment reminder for an overdue/outstanding invoice
+   */
+  async sendPaymentReminder(invoiceId, actorUser) {
+    await new Promise((r) => setTimeout(r, 80));
+    const subs = readUnifiedSubscriptions();
+    const invoices = readUnifiedInvoices(subs);
+    const idx = invoices.findIndex((i) => i.id === invoiceId);
+    if (idx === -1) throw new Error('Invoice not found.');
+
+    const inv = { ...invoices[idx] };
+    inv.lastReminderSentAt = new Date().toISOString();
+    inv.reminderCount = (inv.reminderCount || 0) + 1;
+    inv.updatedAt = new Date().toISOString();
+
+    invoices[idx] = inv;
+    saveUnifiedInvoices(invoices, subs);
+    return inv;
+  },
 };

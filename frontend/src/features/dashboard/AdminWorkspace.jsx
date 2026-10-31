@@ -7,6 +7,7 @@ import TaxManagement from '../taxes/TaxManagement';
 import CustomerBillingPage from '../billing/CustomerBillingPage';
 import SubscriptionManagement from '../operations/SubscriptionManagement';
 import InvoiceManagement from '../operations/InvoiceManagement';
+import PaymentsPage from '../payments/PaymentsPage';
 import StaffManagement from '../staff/StaffManagement';
 
 export default function AdminWorkspace({ initialTab = 'dashboard' }) {
@@ -40,6 +41,7 @@ export default function AdminWorkspace({ initialTab = 'dashboard' }) {
           onConfigureTaxes={() => handleTabChange('taxes')}
         />
       )}
+      {currentTab === 'payments' && <PaymentsPage />}
       {currentTab === 'staff' && <StaffManagement />}
     </AppLayout>
   );

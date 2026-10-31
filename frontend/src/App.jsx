@@ -48,6 +48,21 @@ function DashboardRouter() {
   );
 }
 
+function PaymentsRouter() {
+  const { user } = useAuth();
+  if (user?.role === 'staff') {
+    return <StaffWorkspace initialTab="payments" />;
+  }
+  if (user?.role === 'admin') {
+    return (
+      <RequireAdmin>
+        <AdminWorkspace initialTab="payments" />
+      </RequireAdmin>
+    );
+  }
+  return <StaffWorkspace initialTab="payments" />;
+}
+
 function AccountOverview() {
   const { user, signOut, switchRole } = useAuth();
   const navigate = useNavigate();
@@ -301,6 +316,7 @@ export default function App() {
             <Route path="/checkout" element={<CustomerBillingPage />} />
             <Route path="/billing-runs" element={<BillingRunsPage />} />
             <Route path="/invoices" element={<InvoicesPage />} />
+            <Route path="/payments" element={<PaymentsRouter />} />
 
             {/* Staff Operations Dashboard */}
             <Route
