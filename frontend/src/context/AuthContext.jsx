@@ -56,25 +56,6 @@ export function AuthProvider({ children }) {
     return await authService.resetPassword({ token, newPassword, confirmPassword });
   }, []);
 
-  const quickSwitchUser = useCallback(async (email) => {
-    setIsLoading(true);
-    try {
-      const res = await authService.signIn({ email, password: 'Password123!' });
-      if (res.success) {
-        setUser(res.user);
-      }
-      return res;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const resetDemoData = useCallback(() => {
-    authService.resetToInitialData();
-    setUser(null);
-    window.location.href = '/signin';
-  }, []);
-
   const value = {
     user,
     isLoading,
@@ -83,9 +64,7 @@ export function AuthProvider({ children }) {
     signOut,
     requestPasswordReset,
     validateResetToken,
-    resetPassword,
-    quickSwitchUser,
-    resetDemoData
+    resetPassword
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -98,4 +77,3 @@ export function useAuth() {
   }
   return context;
 }
-

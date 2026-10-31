@@ -10,7 +10,6 @@ export function ForgotPasswordPage() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [demoUrl, setDemoUrl] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -26,9 +25,6 @@ export function ForgotPasswordPage() {
       const res = await requestPasswordReset(email);
       if (res.success) {
         setSubmitted(true);
-        if (res.demoResetUrl) {
-          setDemoUrl(res.demoResetUrl);
-        }
       } else {
         setError(res.error || 'Failed to request reset link.');
       }
@@ -58,34 +54,7 @@ export function ForgotPasswordPage() {
             </div>
           </div>
 
-          {demoUrl && (
-            <div className="bl-card" style={{ padding: 16, background: '#fff7ed', borderColor: '#fed7aa', marginBottom: 20, textAlign: 'left' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#9a3412', marginBottom: 4 }}>
-                🧪 Demo Simulation: Reset Link Generated
-              </div>
-              <p style={{ fontSize: 12, color: '#7c2d12', marginBottom: 12 }}>
-                In this preview environment, you can directly open your simulated reset link:
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Link
-                  to={demoUrl}
-                  className="bl-btn bl-btn-primary bl-btn-sm"
-                  style={{ textDecoration: 'none' }}
-                >
-                  Open Valid Reset Link →
-                </Link>
-                <Link
-                  to="/reset-password?token=invalid_expired_token_123"
-                  className="bl-btn bl-btn-outline bl-btn-sm"
-                  style={{ textDecoration: 'none', fontSize: 12 }}
-                >
-                  Simulate Expired / Invalid Link
-                </Link>
-              </div>
-            </div>
-          )}
-
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 20 }}>
             <Link to="/signin" className="bl-btn bl-btn-secondary bl-btn-lg" style={{ textDecoration: 'none' }}>
               Back to Sign In
             </Link>
@@ -136,4 +105,3 @@ export function ForgotPasswordPage() {
     </AuthLayout>
   );
 }
-
