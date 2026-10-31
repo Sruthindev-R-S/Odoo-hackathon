@@ -311,11 +311,11 @@ async function createSubscription(req, res) {
 		const subscription = (await client.query(
 			`INSERT INTO subscriptions
 			 (subscription_number, customer_id, plan_id, quantity, agreed_price,
-			  agreed_billing_frequency, status, start_date, expiry_date, payment_terms,
+			  agreed_billing_frequency, status, start_date, expiry_date, next_billing_date, billing_anchor_date, payment_terms,
 			  subtotal, tax_total, total)
 			 SELECT 'SUB-' || to_char(CURRENT_DATE,'YYYYMMDD') || '-' ||
 			  lpad(nextval('commercial_number_seq')::text,6,'0'),
-			  $1, id, $2, price, billing_frequency, 'draft', $3, $4, $5, $6, $7, $8
+			  $1, id, $2, price, billing_frequency, 'draft', $3, $4, $3, $3, $5, $6, $7, $8
 			 FROM subscription_plans WHERE id=$9 RETURNING id`,
 			[customerId, quantity, startDate || null, expiryDate || null, paymentTerms || null,
 				totals.subtotal, totals.taxTotal, totals.total, planId]
@@ -420,7 +420,14 @@ async function transitionSubscription(req, res, target) {
 			return res.status(409).json({ error: `Invalid status transition from ${current.status} to ${target}` });
 		}
 		const row = (await client.query(
-			"UPDATE subscriptions SET status=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2 RETURNING id",
+			`UPDATE subscriptions
+			 SET status=$1,
+			     next_billing_date=CASE WHEN $1='active' AND next_billing_date IS NULL
+			       THEN COALESCE(start_date, CURRENT_DATE) ELSE next_billing_date END,
+			     billing_anchor_date=CASE WHEN $1='active' AND billing_anchor_date IS NULL
+			       THEN COALESCE(start_date, CURRENT_DATE) ELSE billing_anchor_date END,
+			     updated_at=CURRENT_TIMESTAMP
+			 WHERE id=$2 RETURNING id`,
 			[target, req.params.subscriptionId]
 		)).rows[0];
 		await client.query(
