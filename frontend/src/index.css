@@ -1,4 +1,5 @@
 /* Brightloop Root Styles */
+@import "tailwindcss";
 @import './styles/brightloop.css';
 
 #root {
