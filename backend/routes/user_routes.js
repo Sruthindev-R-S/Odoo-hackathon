@@ -1,8 +1,8 @@
 const express = require("express");
 const {
-	createUser,
-	getUserByCredentials,
-} = require("../models/user");
+	createCompanyUser,
+	getCompanyUserByCredentials,
+} = require("../models/company_users");
 const { forgotPassword } = require("../controllers/auth");
 
 const router = express.Router();
@@ -25,7 +25,7 @@ router.post("/register", async (req, res) => {
 	}
 
 	try {
-		const user = await createUser(name.trim(), email.trim(), password);
+		const user = await createCompanyUser(name.trim(), email.trim(), password);
 
 		return res.status(201).json({
 			message: "Registration successful",
@@ -49,7 +49,7 @@ router.post("/login", async (req, res) => {
 	}
 
 	try {
-		const user = await getUserByCredentials(name.trim(), password);
+		const user = await getCompanyUserByCredentials(name.trim(), password);
 
 		if (!user) {
 			return res.status(401).json({
