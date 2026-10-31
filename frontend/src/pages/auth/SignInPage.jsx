@@ -10,7 +10,8 @@ export function SignInPage() {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
-    email: '',
+    accountType: 'company',
+    name: '',
     password: '',
   });
 
@@ -31,8 +32,8 @@ export function SignInPage() {
     e.preventDefault();
     setError('');
 
-    if (!formData.email.trim()) {
-      setError('Please enter your email address.');
+    if (!formData.name.trim()) {
+      setError('Please enter your registered name.');
       return;
     }
     if (!formData.password) {
@@ -42,7 +43,11 @@ export function SignInPage() {
 
     setIsSubmitting(true);
     try {
-      const result = await signIn(formData);
+      const result = await signIn({
+        name: formData.name.trim(),
+        password: formData.password,
+        accountType: formData.accountType,
+      });
       if (result.success) {
         navigate(getHomePathForRole(result.user?.role), { replace: true });
       } else {
@@ -58,7 +63,7 @@ export function SignInPage() {
   return (
     <AuthLayout
       title="Sign in to Brightloop"
-      subtitle="Enter your credentials to access your role workspace."
+      subtitle="Select your account type and enter your registered name and password."
     >
       {error && (
         <div className="bl-alert bl-alert-danger" role="alert">
@@ -67,17 +72,75 @@ export function SignInPage() {
       )}
 
       <form onSubmit={handleSubmit} noValidate>
+        <div style={{ marginBottom: 14 }}>
+          <label
+            style={{
+              display: 'block',
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--bl-text-primary)',
+              marginBottom: 6,
+            }}
+          >
+            Sign in as
+          </label>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 8,
+            }}
+          >
+            {[
+              { value: 'company', label: 'Company User (Admin / Staff)' },
+              { value: 'customer', label: 'Customer Portal' },
+            ].map((opt) => {
+              const selected = formData.accountType === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setFormData((prev) => ({ ...prev, accountType: opt.value }));
+                    if (error) setError('');
+                  }}
+                  style={{
+                    padding: '9px 10px',
+                    borderRadius: 8,
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: selected
+                      ? '1px solid #18181b'
+                      : '1px solid #e4e4e7',
+                    backgroundColor: selected ? '#18181b' : '#ffffff',
+                    color: selected ? '#ffffff' : '#3f3f46',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <Input
-          id="signin-email"
-          name="email"
-          type="email"
-          label="Work email"
-          placeholder="name@company.com"
-          value={formData.email}
+          id="signin-name"
+          name="name"
+          type="text"
+          label="Name"
+          placeholder={
+            formData.accountType === 'company'
+              ? 'Enter company user name'
+              : 'Enter customer name'
+          }
+          value={formData.name}
           onChange={handleChange}
           required
           disabled={isSubmitting}
-          autoComplete="email"
+          autoComplete="username"
         />
 
         <Input

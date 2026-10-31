@@ -4,7 +4,7 @@ import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import Switch from '../../components/ui/Switch';
 import Button from '../../components/ui/Button';
-import { BILLING_PERIODS, INITIAL_PLAN_STATE } from '../../api/types';
+import { BILLING_PERIODS, AUTO_CLOSE_POLICIES, INITIAL_PLAN_STATE } from '../../api/types';
 import { validatePlanForm } from '../../lib/validation';
 import { productService } from '../../api/services/productService';
 import { Layers, Calendar } from 'lucide-react';
@@ -34,6 +34,9 @@ export default function PlanDrawer({
 
   useEffect(() => {
     if (initialData) {
+      const resolvedAutoClose =
+        initialData.autoClose ||
+        (initialData.autoCloseOnEnd !== false ? 'end_of_term' : 'none');
       setFormData({
         name: initialData.name || '',
         productId: initialData.productId || '',
@@ -43,8 +46,9 @@ export default function PlanDrawer({
         minQuantity: initialData.minQuantity || 1,
         availableFrom: initialData.availableFrom ? initialData.availableFrom.substring(0, 10) : '',
         availableTo: initialData.availableTo ? initialData.availableTo.substring(0, 10) : '',
-        autoCloseOnEnd: initialData.autoCloseOnEnd !== undefined ? initialData.autoCloseOnEnd : true,
-        allowEarlyClose: initialData.allowEarlyClose !== undefined ? initialData.allowEarlyClose : true,
+        autoClose: resolvedAutoClose,
+        autoCloseOnEnd: resolvedAutoClose !== 'none',
+        allowEarlyClose: initialData.allowEarlyClose !== undefined ? initialData.allowEarlyClose : false,
         allowPause: initialData.allowPause !== undefined ? initialData.allowPause : true,
         allowRenewal: initialData.allowRenewal !== undefined ? initialData.allowRenewal : true,
       });
@@ -92,10 +96,16 @@ export default function PlanDrawer({
     }
   };
 
-  const productOptions = products.map((p) => ({
-    value: p.id,
-    label: `${p.name} (Base ₹${p.salesPrice.toLocaleString('en-IN')})`,
-  }));
+  const productOptions = [
+    {
+      value: '',
+      label: 'None (General plan — select products on quotation/subscription)',
+    },
+    ...products.map((p) => ({
+      value: p.id,
+      label: `${p.name} (Base ₹${Number(p.salesPrice || 0).toLocaleString('en-IN')})`,
+    })),
+  ];
 
   return (
     <Drawer
@@ -137,27 +147,17 @@ export default function PlanDrawer({
           error={errors.name}
         />
 
-        {/* Associated Product */}
+        {/* Associated Product (Optional) */}
         <div>
           <Select
-            label="Associated Product"
-            required
-            placeholder={
-              products.length === 0
-                ? 'No products available — add a product first'
-                : 'Select product from catalog'
-            }
+            label="Default Associated Product (Optional)"
+            placeholder=""
             options={productOptions}
             value={formData.productId}
             onChange={handleProductChange}
             error={errors.productId}
-            helperText="The catalog product this recurring plan licenses or delivers."
+            helperText="Optional default catalog product; quotation templates and subscriptions can include any catalog products."
           />
-          {products.length === 0 && (
-            <p className="text-xs text-amber-800 mt-1 font-medium">
-              Notice: You must have at least one product created before saving a plan.
-            </p>
-          )}
         </div>
 
         {/* Pricing & Frequency Grid */}
@@ -189,20 +189,38 @@ export default function PlanDrawer({
           />
         </div>
 
-        {/* Minimum Quantity */}
-        <Input
-          label="Minimum Quantity"
-          required
-          type="number"
-          min="1"
-          placeholder="1"
-          value={formData.minQuantity}
-          onChange={(e) =>
-            setFormData((prev) => ({ ...prev, minQuantity: e.target.value }))
-          }
-          error={errors.minQuantity}
-          helperText="Minimum licenses or units required when subscribing to this plan"
-        />
+        {/* Minimum Quantity & Auto-Close Policy */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Input
+            label="Minimum Quantity"
+            required
+            type="number"
+            min="1"
+            placeholder="1"
+            value={formData.minQuantity}
+            onChange={(e) =>
+              setFormData((prev) => ({ ...prev, minQuantity: e.target.value }))
+            }
+            error={errors.minQuantity}
+            helperText="Minimum licenses or units required"
+          />
+
+          <Select
+            label="Auto-Close Policy"
+            placeholder=""
+            options={AUTO_CLOSE_POLICIES}
+            value={formData.autoClose || (formData.autoCloseOnEnd ? 'end_of_term' : 'none')}
+            onChange={(e) => {
+              const policy = e.target.value;
+              setFormData((prev) => ({
+                ...prev,
+                autoClose: policy,
+                autoCloseOnEnd: policy !== 'none',
+              }));
+            }}
+            helperText="Policy applied when subscription term ends"
+          />
+        </div>
 
         {/* Availability Dates */}
         <div className="space-y-3 pt-3 border-t border-zinc-200">
@@ -253,7 +271,15 @@ export default function PlanDrawer({
               description="Subscription automatically transitions to Closed upon expiry without recurring extension."
               checked={formData.autoCloseOnEnd}
               onChange={(checked) =>
-                setFormData((prev) => ({ ...prev, autoCloseOnEnd: checked }))
+                setFormData((prev) => ({
+                  ...prev,
+                  autoCloseOnEnd: checked,
+                  autoClose: checked
+                    ? prev.autoClose && prev.autoClose !== 'none'
+                      ? prev.autoClose
+                      : 'end_of_term'
+                    : 'none',
+                }))
               }
             />
 

@@ -1,11 +1,13 @@
-import { Edit2, Trash2, Repeat, PauseCircle, Clock, ShieldAlert } from 'lucide-react';
+import { Edit2, Trash2, Power, Repeat, PauseCircle, Clock, ShieldAlert } from 'lucide-react';
 import MoneyText from '../../components/domain/MoneyText';
 import PlanBadge from '../../components/domain/PlanBadge';
+import Badge from '../../components/ui/Badge';
 import { formatDate } from '../../lib/format';
 
 export default function PlanTable({
   plans = [],
   onEdit,
+  onToggleStatus,
   onDelete,
 }) {
   return (
@@ -76,10 +78,17 @@ export default function PlanTable({
 
               {/* Status Badge */}
               <td className="px-4 py-4 text-center whitespace-nowrap">
-                <PlanBadge
-                  availableFrom={plan.availableFrom}
-                  availableTo={plan.availableTo}
-                />
+                {plan.active === false ? (
+                  <Badge variant="neutral" size="sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                    Inactive / Archived
+                  </Badge>
+                ) : (
+                  <PlanBadge
+                    availableFrom={plan.availableFrom}
+                    availableTo={plan.availableTo}
+                  />
+                )}
               </td>
 
               {/* Allowed Behaviors (4 switches) */}
@@ -88,9 +97,10 @@ export default function PlanTable({
                   {plan.autoCloseOnEnd && (
                     <span
                       className="inline-flex items-center gap-1 text-[11px] bg-zinc-100 text-zinc-800 border border-zinc-200 px-2 py-0.5 rounded"
-                      title="Closes automatically when it ends"
+                      title={`Auto-close policy: ${plan.autoClose || 'end_of_term'}`}
                     >
-                      <Clock className="w-3 h-3 text-zinc-500" /> Auto-close
+                      <Clock className="w-3 h-3 text-zinc-500" />{' '}
+                      {plan.autoClose === 'immediate' ? 'Auto-close (Immediate)' : 'Auto-close'}
                     </span>
                   )}
                   {plan.allowEarlyClose && (
@@ -123,6 +133,23 @@ export default function PlanTable({
               {/* Actions */}
               <td className="px-4 py-4 text-right whitespace-nowrap">
                 <div className="flex items-center justify-end gap-1">
+                  {onToggleStatus && (
+                    <button
+                      onClick={() => onToggleStatus(plan)}
+                      className={`p-1.5 rounded-md transition-colors ${
+                        plan.active === false
+                          ? 'text-emerald-700 hover:bg-emerald-50'
+                          : 'text-zinc-500 hover:text-amber-700 hover:bg-amber-50'
+                      }`}
+                      title={
+                        plan.active === false
+                          ? 'Activate plan'
+                          : 'Deactivate plan'
+                      }
+                    >
+                      <Power className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => onEdit(plan)}
                     className="p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors"
@@ -133,7 +160,7 @@ export default function PlanTable({
                   <button
                     onClick={() => onDelete(plan)}
                     className="p-1.5 text-zinc-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                    title="Delete plan"
+                    title="Archive / Delete plan"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

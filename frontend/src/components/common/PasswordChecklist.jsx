@@ -8,7 +8,7 @@ export function PasswordChecklist({ password = '', confirmPassword, showConfirmC
   const items = [
     {
       id: 'rule-length',
-      label: 'At least 9 characters',
+      label: 'At least 8 characters',
       valid: rules.hasMinLength
     },
     {

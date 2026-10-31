@@ -1,16 +1,36 @@
 /**
- * Operations Service Layer (Subscriptions, Billing Day & Invoices)
+ * Operations Service Layer (Subscriptions, Billing Day, Invoices & Payments)
+ *
+ * Integrates live backend Subscription endpoints at http://192.168.0.155:3000:
+ *  39. POST   /api/subscriptions
+ *  40. GET    /api/subscriptions?page=1&limit=100&status=...&planId=...&customerId=...&search=...
+ *  41. GET    /api/subscriptions/{subscriptionId}
+ *  42. PATCH  /api/subscriptions/{subscriptionId}
+ *  43. POST   /api/subscriptions/{subscriptionId}/quote
+ *  44. POST   /api/subscriptions/{subscriptionId}/confirm
+ *  45. POST   /api/subscriptions/{subscriptionId}/activate
+ *  46. POST   /api/subscriptions/{subscriptionId}/close
+ *  47. GET    /api/subscriptions/{subscriptionId}/items
+ *  48. POST   /api/subscriptions/{subscriptionId}/items
+ *  49. PATCH  /api/subscriptions/{subscriptionId}/items/{itemId}
+ *  50. DELETE /api/subscriptions/{subscriptionId}/items/{itemId}
+ *  51. GET    /api/subscriptions/{subscriptionId}/history
  *
  * Unifies storage seamlessly with CustomerBillingPage (billingService.js) while enforcing:
  * - Strict customer tenant isolation when signed in as a customer
  * - Subscription lifecycle transitions (Draft -> Quotation -> Confirmed -> Active -> Closed)
  * - Plan behavioral switches (autoCloseOnEnd, allowEarlyClose, allowPause, allowRenewal)
- * - Billing Day bulk invoice creation from subscriptions (customer details, product lines,
- *   automatic tax calculation from Admin tax rules, and totals pre-filled)
- * - Invoice lifecycle (Draft -> Confirmed -> Paid, plus Cancel, Send, and Print)
- * - Duplicate-billing & skip prevention via deterministic billing cycle keys
+ * - Automatic volume & subscription discount rules with usage/expiry auto-stop
+ * - Billing Day bulk invoice creation, tax rules, invoice lifecycle, and payment collections
  */
 
+import {
+  apiClient,
+  isNetworkOfflineError,
+  isUuid,
+  resolveCompanyUserId,
+} from '../client.js';
+import { rememberKnownCustomer } from '../../services/authService.js';
 import { calculateTaxesFromRules, taxService } from './taxService.js';
 import {
   evaluateApplicableDiscount,
@@ -20,10 +40,20 @@ import {
 
 const SUBSCRIPTIONS_KEY = 'brightloop_subscriptions_v1';
 const LEGACY_SUBSCRIPTIONS_KEY = 'brightloop_subscriptions';
+const SUBSCRIPTION_META_KEY = 'brightloop_subscription_meta_v1';
 const INVOICES_KEY = 'brightloop_invoices_v1';
 const LEGACY_INVOICES_KEY = 'brightloop_invoices';
 const BILLING_RUNS_KEY = 'brightloop_billing_runs';
 const PRODUCTS_KEY = 'brightloop_products';
+const PLANS_KEY = 'brightloop_plans';
+
+const STATUS_HISTORY_LABELS = {
+  draft: 'Subscription created in Draft',
+  quotation: 'Moved from Draft to Quotation',
+  confirmed: 'Quotation confirmed',
+  active: 'Subscription activated',
+  closed: 'Subscription closed',
+};
 
 function readRawArray(key) {
   try {
@@ -44,6 +74,26 @@ function writeStore(key, items) {
   }
 }
 
+function getSubscriptionMetaMap() {
+  try {
+    const raw = localStorage.getItem(SUBSCRIPTION_META_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSubscriptionMeta(subId, metaPatch) {
+  if (!subId) return;
+  try {
+    const map = getSubscriptionMetaMap();
+    map[subId] = { ...(map[subId] || {}), ...metaPatch };
+    localStorage.setItem(SUBSCRIPTION_META_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 function getProductsMap() {
   const products = readRawArray(PRODUCTS_KEY);
   const map = new Map();
@@ -53,8 +103,17 @@ function getProductsMap() {
   return map;
 }
 
+function getPlansMap() {
+  const plans = readRawArray(PLANS_KEY);
+  const map = new Map();
+  plans.forEach((p) => {
+    if (p && p.id) map.set(p.id, p);
+  });
+  return map;
+}
+
 function addPeriodToDate(dateStr, period) {
-  const base = dateStr ? new Date(`${dateStr}T00:00:00Z`) : new Date();
+  const base = dateStr ? new Date(`${dateStr.slice(0, 10)}T00:00:00Z`) : new Date();
   if (Number.isNaN(base.getTime())) {
     return new Date().toISOString().slice(0, 10);
   }
@@ -64,6 +123,257 @@ function addPeriodToDate(dateStr, period) {
   else if (period === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
   else d.setUTCMonth(d.getUTCMonth() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+function normalizeTaxesInput(line) {
+  if (Array.isArray(line?.taxes) && line.taxes.length > 0) {
+    return line.taxes.map((t) => ({
+      name: String(t.name || 'VAT').trim() || 'VAT',
+      rate: Math.max(0, Number(t.rate ?? t.percentage ?? 0)),
+    }));
+  }
+  if (line?.taxRatePercent !== undefined && line?.taxRatePercent !== '') {
+    const rate = Math.max(0, Number(line.taxRatePercent) || 0);
+    return rate > 0
+      ? [{ name: String(line.taxName || 'VAT').trim() || 'VAT', rate }]
+      : [];
+  }
+  if (
+    typeof line?.taxRate === 'number' ||
+    (typeof line?.taxRate === 'string' && /^\d+(\.\d+)?$/.test(line.taxRate.trim()))
+  ) {
+    const rate = Math.max(0, Number(line.taxRate) || 0);
+    return rate > 0
+      ? [{ name: String(line.taxName || 'VAT').trim() || 'VAT', rate }]
+      : [];
+  }
+  return [{ name: 'VAT', rate: 18 }];
+}
+
+function buildApiSubscriptionItem(line) {
+  const item = {
+    productId: line.productId || line.product_id,
+    quantity: Math.max(1, Number(line.quantity) || 1),
+    unitPrice: Math.max(0, Number(line.unitPrice ?? line.unit_price) || 0),
+    taxes: normalizeTaxesInput(line),
+  };
+  const variantId = line.variantId || line.variant_id;
+  if (variantId && isUuid(variantId)) {
+    item.variantId = variantId;
+  } else if (variantId) {
+    item.variantId = variantId;
+  }
+  return item;
+}
+
+function calculateExplicitItemTaxes(linesWithTaxes) {
+  const subtotal =
+    Math.round(
+      linesWithTaxes.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100
+    ) / 100;
+  const bucketMap = new Map();
+
+  linesWithTaxes.forEach((line) => {
+    const lineAmt = Number(line.amount) || 0;
+    const taxes = Array.isArray(line.taxes) ? line.taxes : [];
+    taxes.forEach((t) => {
+      const name = String(t.name || 'VAT').trim() || 'VAT';
+      const rate = Math.max(0, Number(t.rate ?? t.percentage ?? 0));
+      if (rate <= 0) return;
+      const key = `${name}::${rate}`;
+      const prev = bucketMap.get(key) || {
+        id: `tax_${name.toLowerCase()}_${rate}`,
+        name,
+        rate,
+        taxableAmount: 0,
+        amount: 0,
+      };
+      prev.taxableAmount = Math.round((prev.taxableAmount + lineAmt) * 100) / 100;
+      prev.amount =
+        Math.round((prev.amount + (lineAmt * rate) / 100) * 100) / 100;
+      bucketMap.set(key, prev);
+    });
+  });
+
+  const taxLines = Array.from(bucketMap.values());
+  const taxAmount =
+    Math.round(taxLines.reduce((s, tl) => s + tl.amount, 0) * 100) / 100;
+  const taxRate =
+    taxLines.length > 0
+      ? taxLines.map((t) => `${t.rate}% ${t.name}`).join(' + ')
+      : '0%';
+
+  return {
+    subtotal,
+    taxLines,
+    taxRate,
+    taxAmount,
+    total: Math.round((subtotal + taxAmount) * 100) / 100,
+  };
+}
+
+function mapApiHistoryRows(rows = [], extraEvents = []) {
+  const apiEvents = (Array.isArray(rows) ? rows : []).map((row, idx) => {
+    if (row.label && row.timestamp) return row;
+    return {
+      id: row.id || `hist_${idx}`,
+      status: row.status || 'draft',
+      label:
+        STATUS_HISTORY_LABELS[row.status] ||
+        `Status changed to ${row.status || 'draft'}`,
+      actor: row.changed_by
+        ? `Company User #${row.changed_by}`
+        : row.actor || 'System',
+      changedBy: row.changed_by ?? null,
+      timestamp: row.changed_at || row.timestamp || new Date().toISOString(),
+    };
+  });
+  return [...apiEvents, ...(Array.isArray(extraEvents) ? extraEvents : [])];
+}
+
+function mapApiSubscriptionToRaw(apiSub, historyRows = null) {
+  if (!apiSub) return null;
+  const metaMap = getSubscriptionMetaMap();
+  const meta = metaMap[apiSub.id] || {};
+  const plansById = getPlansMap();
+  const planId = apiSub.plan_id ?? apiSub.planId ?? '';
+  const cachedPlan = plansById.get(planId);
+
+  if (apiSub.customer_id !== undefined && apiSub.customer_id !== null) {
+    rememberKnownCustomer({
+      id: apiSub.customer_id,
+      customerId: apiSub.customer_id,
+      name: apiSub.customer_name || meta.customerName || `Customer #${apiSub.customer_id}`,
+      email: meta.customerEmail || '',
+      organization: meta.customerOrganization || '',
+    });
+  }
+
+  const apiItems = Array.isArray(apiSub.items) ? apiSub.items : [];
+  const mappedApiLines = apiItems.map((it, idx) => ({
+    id: it.id || `sitem_${idx}`,
+    productId: it.product_id ?? it.productId ?? '',
+    productName: it.product_name ?? it.productName ?? 'Product',
+    name: it.product_name ?? it.productName ?? 'Product',
+    variantId: it.variant_id ?? it.variantId ?? '',
+    variant: it.variant_name ?? it.variantName ?? it.variantLabel ?? null,
+    quantity: Number(it.quantity) || 1,
+    unitPrice: Number(it.unit_price ?? it.unitPrice ?? 0),
+    amount:
+      Math.round(
+        (Number(it.quantity) || 1) *
+          Number(it.unit_price ?? it.unitPrice ?? 0) *
+          100
+      ) / 100,
+    taxes: Array.isArray(it.taxes) ? it.taxes : [],
+  }));
+
+  const effectiveLines =
+    apiSub.status !== 'draft' &&
+    Array.isArray(meta.seatOverrideLines) &&
+    meta.seatOverrideLines.length > 0
+      ? meta.seatOverrideLines
+      : mappedApiLines.length > 0
+      ? mappedApiLines
+      : [
+          {
+            id: `line_${apiSub.id}_0`,
+            productId: cachedPlan?.productId || meta.productId || '',
+            productName:
+              cachedPlan?.productName ||
+              apiSub.plan_name ||
+              meta.planName ||
+              'Subscription Plan',
+            name:
+              cachedPlan?.productName ||
+              apiSub.plan_name ||
+              meta.planName ||
+              'Subscription Plan',
+            quantity: Math.max(1, Number(apiSub.quantity) || 1),
+            unitPrice: Number(apiSub.agreed_price ?? cachedPlan?.price ?? 0),
+            amount:
+              Math.round(
+                Math.max(1, Number(apiSub.quantity) || 1) *
+                  Number(apiSub.agreed_price ?? cachedPlan?.price ?? 0) *
+                  100
+              ) / 100,
+          },
+        ];
+
+  const billingPeriod =
+    apiSub.agreed_billing_frequency ||
+    apiSub.billingPeriod ||
+    cachedPlan?.billingPeriod ||
+    meta.billingPeriod ||
+    'monthly';
+  const startDate = apiSub.start_date
+    ? String(apiSub.start_date).slice(0, 10)
+    : meta.startDate || new Date().toISOString().slice(0, 10);
+  const nextBillingDate =
+    meta.nextBillingDate || addPeriodToDate(startDate, billingPeriod);
+  const expiryDate = apiSub.expiry_date
+    ? String(apiSub.expiry_date).slice(0, 10)
+    : meta.expiryDate || nextBillingDate;
+
+  return {
+    id: apiSub.id,
+    subscriptionNumber:
+      apiSub.subscription_number ||
+      apiSub.subscriptionNumber ||
+      `SUB-${String(apiSub.id).slice(0, 8)}`,
+    customerId: apiSub.customer_id ?? apiSub.customerId ?? meta.customerId,
+    customerName:
+      apiSub.customer_name ||
+      meta.customerName ||
+      `Customer #${apiSub.customer_id ?? ''}`,
+    customerEmail: meta.customerEmail || '',
+    customerOrganization: meta.customerOrganization || '',
+    billingAddress: meta.billingAddress || '',
+    planId,
+    planName:
+      apiSub.plan_name || cachedPlan?.name || meta.planName || 'Subscription Plan',
+    billingPeriod,
+    templateId: meta.templateId || '',
+    templateName: meta.templateName || '',
+    validityDays: meta.validityDays ?? null,
+    preferredDiscountRuleId: meta.preferredDiscountRuleId || '',
+    appliedDiscountRuleId: meta.appliedDiscountRuleId || '',
+    paymentTerms:
+      apiSub.payment_terms || meta.paymentTerms || 'Due on receipt',
+    status: apiSub.status || 'draft',
+    isPaused: Boolean(meta.isPaused),
+    startDate,
+    expiryDate,
+    nextBillingDate,
+    quantity: Math.max(1, Number(apiSub.quantity) || 1),
+    lineItems: effectiveLines,
+    planRules: meta.planRules || {
+      autoCloseOnEnd:
+        cachedPlan?.autoCloseOnEnd !== undefined
+          ? Boolean(cachedPlan.autoCloseOnEnd)
+          : true,
+      allowEarlyClose:
+        cachedPlan?.allowEarlyClose !== undefined
+          ? Boolean(cachedPlan.allowEarlyClose)
+          : true,
+      allowPause:
+        cachedPlan?.allowPause !== undefined
+          ? Boolean(cachedPlan.allowPause)
+          : true,
+      allowRenewal:
+        cachedPlan?.allowRenewal !== undefined
+          ? Boolean(cachedPlan.allowRenewal)
+          : true,
+    },
+    history: mapApiHistoryRows(
+      historyRows || apiSub.history || [],
+      meta.localEvents || []
+    ),
+    createdAt:
+      apiSub.created_at || apiSub.createdAt || new Date().toISOString(),
+    updatedAt:
+      apiSub.updated_at || apiSub.updatedAt || new Date().toISOString(),
+  };
 }
 
 function normalizeSubscription(raw) {
@@ -80,7 +390,9 @@ function normalizeSubscription(raw) {
     Number(
       raw.subtotal ??
         raw.recurringAmount ??
-        (fallbackUnitPrice > 0 ? fallbackUnitPrice * fallbackQuantity : raw.amount)
+        (fallbackUnitPrice > 0
+          ? fallbackUnitPrice * fallbackQuantity
+          : raw.amount)
     ) || 0;
 
   const primaryProductName =
@@ -111,38 +423,61 @@ function normalizeSubscription(raw) {
           },
         ];
 
+  const hasExplicitLineTaxes = rawLines.some(
+    (it) => Array.isArray(it.taxes) && it.taxes.length > 0
+  );
+
   const lineItems = rawLines.map((item, idx) => {
     const qty = Math.max(1, Number(item.quantity) || 1);
     const uPrice = Number(item.unitPrice) || 0;
-    const untaxedAmount =
-      Math.round(
-        (item.amount !== undefined && Number(item.amount) > 0
-          ? Number(item.amount)
-          : uPrice * qty) * 100
-      ) / 100;
+    const untaxedAmount = Math.round(uPrice * qty * 100) / 100;
     const prodId = item.productId || (idx === 0 ? raw.productId || '' : '');
     const prodName =
-      item.productName || item.name || (idx === 0 ? primaryProductName : 'Product');
+      item.productName ||
+      item.name ||
+      (idx === 0 ? primaryProductName : 'Product');
     const variantText = item.variant || item.variantLabel || null;
     const desc =
       item.description ||
       (variantText ? `${prodName} (${variantText})` : prodName);
 
-    const lineTax = calculateTaxesFromRules(
-      [
+    let lineTax;
+    if (Array.isArray(item.taxes) && item.taxes.length > 0) {
+      lineTax = calculateExplicitItemTaxes([
+        { amount: untaxedAmount, taxes: item.taxes },
+      ]);
+    } else if (hasExplicitLineTaxes && Array.isArray(item.taxes)) {
+      lineTax = {
+        taxRate: '0%',
+        taxAmount: 0,
+        total: untaxedAmount,
+      };
+    } else {
+      lineTax = calculateTaxesFromRules(
+        [
+          {
+            productId: prodId,
+            productType: item.productType || '',
+            amount: untaxedAmount,
+          },
+        ],
         {
-          productId: prodId,
-          productType: item.productType || '',
-          amount: untaxedAmount,
-        },
-      ],
-      {
-        billingPeriod,
-        defaultProductId: prodId,
-        defaultProductType: prodId ? productsById.get(prodId)?.type || '' : '',
-        productsById,
-      }
-    );
+          billingPeriod,
+          defaultProductId: prodId,
+          defaultProductType: prodId
+            ? productsById.get(prodId)?.type || ''
+            : '',
+          productsById,
+        }
+      );
+    }
+
+    const explicitRatePercent = Array.isArray(item.taxes)
+      ? item.taxes.reduce(
+          (s, t) => s + (Number(t.rate ?? t.percentage) || 0),
+          0
+        )
+      : undefined;
 
     return {
       id: item.id || `line_${raw.id || 'sub'}_${idx}`,
@@ -157,6 +492,10 @@ function normalizeSubscription(raw) {
       quantity: qty,
       unitPrice: uPrice,
       amount: untaxedAmount,
+      ...(Array.isArray(item.taxes) ? { taxes: item.taxes } : {}),
+      ...(explicitRatePercent !== undefined
+        ? { taxRatePercent: explicitRatePercent }
+        : {}),
       taxRate: lineTax.taxRate,
       taxAmount: lineTax.taxAmount,
       totalWithTax: lineTax.total,
@@ -176,13 +515,17 @@ function normalizeSubscription(raw) {
     amount: dl.netAmount,
   }));
 
-  const subTaxCalc = calculateTaxesFromRules(taxableLines, {
-    billingPeriod,
-    defaultProductId: raw.productId || lineItems[0]?.productId || '',
-    productsById,
-  });
+  const subTaxCalc = hasExplicitLineTaxes
+    ? calculateExplicitItemTaxes(taxableLines)
+    : calculateTaxesFromRules(taxableLines, {
+        billingPeriod,
+        defaultProductId: raw.productId || lineItems[0]?.productId || '',
+        productsById,
+      });
 
-  const startDate = raw.startDate || new Date().toISOString().slice(0, 10);
+  const startDate = raw.startDate
+    ? String(raw.startDate).slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
   const nextBillingDate =
     raw.nextBillingDate ||
     raw.currentPeriodEnd ||
@@ -195,7 +538,9 @@ function normalizeSubscription(raw) {
     templateId: raw.templateId || '',
     templateName: raw.templateName || '',
     validityDays:
-      raw.validityDays !== undefined && raw.validityDays !== null && raw.validityDays !== ''
+      raw.validityDays !== undefined &&
+      raw.validityDays !== null &&
+      raw.validityDays !== ''
         ? Number(raw.validityDays)
         : null,
     preferredDiscountRuleId,
@@ -216,7 +561,8 @@ function normalizeSubscription(raw) {
     variantExtraPrice:
       Number(raw.variantExtraPrice ?? leadLine?.variantExtraPrice) || 0,
     baseUnitPrice:
-      Number(raw.baseUnitPrice ?? leadLine?.unitPrice ?? fallbackUnitPrice) || 0,
+      Number(raw.baseUnitPrice ?? leadLine?.unitPrice ?? fallbackUnitPrice) ||
+      0,
     unitPrice: Number(leadLine?.unitPrice ?? fallbackUnitPrice) || 0,
     quantity: Number(leadLine?.quantity ?? fallbackQuantity) || 1,
     grossSubtotal: discCalc.grossSubtotal,
@@ -236,7 +582,9 @@ function normalizeSubscription(raw) {
     isPaused: Boolean(raw.isPaused),
     startDate,
     nextBillingDate,
-    expiryDate: raw.expiryDate || raw.currentPeriodEnd || nextBillingDate,
+    expiryDate: raw.expiryDate
+      ? String(raw.expiryDate).slice(0, 10)
+      : raw.currentPeriodEnd || nextBillingDate,
     lineItems,
     planRules: {
       autoCloseOnEnd:
@@ -274,16 +622,19 @@ function normalizeSubscription(raw) {
 function normalizeInvoice(raw, subsById = new Map()) {
   if (!raw) return raw;
   const linkedSub = raw.subscriptionId ? subsById.get(raw.subscriptionId) : null;
-  const rawLines = Array.isArray(raw.lines) && raw.lines.length > 0
-    ? raw.lines
-    : Array.isArray(raw.lineItems)
-    ? raw.lineItems
-    : [];
+  const rawLines =
+    Array.isArray(raw.lines) && raw.lines.length > 0
+      ? raw.lines
+      : Array.isArray(raw.lineItems)
+      ? raw.lineItems
+      : [];
 
   const normalizedLines = rawLines.map((line, idx) => {
     const desc =
       line.description ||
-      (line.variant ? `${line.name} (${line.variant})` : line.name || 'Subscription Line');
+      (line.variant
+        ? `${line.name} (${line.variant})`
+        : line.name || 'Subscription Line');
     return {
       id: line.id || `inv_line_${raw.id}_${idx}`,
       name: line.name || desc,
@@ -299,13 +650,13 @@ function normalizeInvoice(raw, subsById = new Map()) {
     (sum, l) => sum + (Number(l.amount) || 0),
     0
   );
-  const subtotal = Math.round(
-    Number(raw.subtotal ?? (computedLineSum || raw.total || 0)) * 100
-  ) / 100;
+  const subtotal =
+    Math.round(
+      Number(raw.subtotal ?? (computedLineSum || raw.total || 0)) * 100
+    ) / 100;
   const taxAmount = Math.round((Number(raw.taxAmount) || 0) * 100) / 100;
-  const total = Math.round(
-    Number(raw.total ?? subtotal + taxAmount) * 100
-  ) / 100;
+  const total =
+    Math.round(Number(raw.total ?? subtotal + taxAmount) * 100) / 100;
 
   const status = raw.status || 'draft';
   const amountPaid =
@@ -332,7 +683,10 @@ function normalizeInvoice(raw, subsById = new Map()) {
           {
             id: 'tax_recorded',
             name: raw.taxRate || 'GST (18%)',
-            rate: subtotal > 0 ? Math.round((taxAmount / subtotal) * 10000) / 100 : 18,
+            rate:
+              subtotal > 0
+                ? Math.round((taxAmount / subtotal) * 10000) / 100
+                : 18,
             taxableAmount: subtotal,
             amount: taxAmount,
           },
@@ -356,7 +710,6 @@ function normalizeInvoice(raw, subsById = new Map()) {
         ]
       : [];
 
-  // Map checkout-generated invoices to the subscription's initial cycle key so Billing Day never double-bills
   const billingCycleKey =
     raw.billingCycleKey ||
     (raw.subscriptionId && linkedSub
@@ -369,7 +722,7 @@ function normalizeInvoice(raw, subsById = new Map()) {
     subscriptionId: raw.subscriptionId || '',
     subscriptionNumber:
       raw.subscriptionNumber || linkedSub?.subscriptionNumber || '—',
-    customerId: raw.customerId || linkedSub?.customerId || '',
+    customerId: raw.customerId ?? linkedSub?.customerId ?? '',
     customerName: raw.customerName || linkedSub?.customerName || 'Customer',
     customerEmail: raw.customerEmail || linkedSub?.customerEmail || '',
     customerOrganization:
@@ -388,8 +741,7 @@ function normalizeInvoice(raw, subsById = new Map()) {
       linkedSub?.planName ||
       normalizedLines[0]?.name ||
       'Subscription Plan',
-    billingPeriod:
-      raw.billingPeriod || linkedSub?.billingPeriod || 'monthly',
+    billingPeriod: raw.billingPeriod || linkedSub?.billingPeriod || 'monthly',
     invoiceDate,
     date: invoiceDate,
     dueDate,
@@ -460,6 +812,19 @@ function saveUnifiedSubscriptions(subs) {
   return normalized;
 }
 
+function upsertUnifiedSubscription(subObj) {
+  const normalized = normalizeSubscription(subObj);
+  const all = readUnifiedSubscriptions();
+  const idx = all.findIndex((s) => s.id === normalized.id);
+  if (idx >= 0) {
+    all[idx] = normalized;
+  } else {
+    all.unshift(normalized);
+  }
+  writeStore(SUBSCRIPTIONS_KEY, all);
+  return normalized;
+}
+
 function readUnifiedInvoices(existingSubs = null) {
   const subs = existingSubs || readUnifiedSubscriptions();
   const subsById = new Map(subs.map((s) => [s.id, s]));
@@ -477,7 +842,10 @@ function readUnifiedInvoices(existingSubs = null) {
         combined.push(item);
       }
     });
-    writeStore(INVOICES_KEY, combined.map((i) => normalizeInvoice(i, subsById)));
+    writeStore(
+      INVOICES_KEY,
+      combined.map((i) => normalizeInvoice(i, subsById))
+    );
     try {
       localStorage.removeItem(LEGACY_INVOICES_KEY);
     } catch {
@@ -498,16 +866,71 @@ function saveUnifiedInvoices(invoices, existingSubs = null) {
 
 function belongsToCustomer(record, user) {
   if (!user) return false;
-  if (user.customerId && record.customerId && record.customerId === user.customerId) {
+  if (
+    user.customerId !== undefined &&
+    user.customerId !== null &&
+    record.customerId !== undefined &&
+    record.customerId !== null &&
+    String(record.customerId) === String(user.customerId)
+  ) {
     return true;
   }
-  if (user.id && record.customerId && record.customerId === user.id) {
+  if (
+    user.id !== undefined &&
+    user.id !== null &&
+    record.customerId !== undefined &&
+    record.customerId !== null &&
+    String(record.customerId) === String(user.id)
+  ) {
     return true;
   }
   if (user.email && record.customerEmail) {
     return record.customerEmail.toLowerCase() === user.email.toLowerCase();
   }
+  if (user.name && record.customerName && !record.customerEmail) {
+    return record.customerName.toLowerCase() === user.name.toLowerCase();
+  }
   return false;
+}
+
+function filterLocalSubscriptions(list, filters = {}) {
+  return list.filter((sub) => {
+    if (filters.status && filters.status !== 'all') {
+      if (filters.status === 'paused') {
+        if (!(sub.status === 'active' && sub.isPaused)) return false;
+      } else if (sub.status !== filters.status) {
+        return false;
+      }
+    }
+    if (
+      filters.planId &&
+      filters.planId !== 'all' &&
+      sub.planId !== filters.planId
+    ) {
+      return false;
+    }
+    if (
+      filters.customerId &&
+      String(sub.customerId) !== String(filters.customerId)
+    ) {
+      return false;
+    }
+    if (filters.search && filters.search.trim()) {
+      const q = filters.search.trim().toLowerCase();
+      const hay = [
+        sub.subscriptionNumber,
+        sub.customerName,
+        sub.customerEmail,
+        sub.customerOrganization,
+        sub.planName,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
 }
 
 function buildInvoiceFromSubscription(
@@ -639,51 +1062,186 @@ function buildInvoiceFromSubscription(
 
 export const operationsService = {
   /**
-   * Fetch subscriptions scoped by role.
+   * 40. GET /api/subscriptions?page=1&limit=100&status=...&planId=...&customerId=...&search=...
+   * Hydrates child items (#41) and status history (#51) for company users.
    * Signed-in customers strictly receive only their own subscriptions.
    */
-  async getSubscriptions(actorUser) {
-    await new Promise((r) => setTimeout(r, 50));
+  async getSubscriptions(actorUser, filters = {}) {
     if (!actorUser) return [];
-    const all = readUnifiedSubscriptions();
+
     if (actorUser.role === 'customer') {
-      return all.filter((sub) => belongsToCustomer(sub, actorUser));
+      const all = readUnifiedSubscriptions();
+      return filterLocalSubscriptions(
+        all.filter((sub) => belongsToCustomer(sub, actorUser)),
+        filters
+      );
     }
-    return all;
+
+    if (resolveCompanyUserId(actorUser)) {
+      try {
+        const apiStatus =
+          filters.status &&
+          filters.status !== 'all' &&
+          filters.status !== 'paused'
+            ? filters.status
+            : undefined;
+        const listRes = await apiClient.get('/api/subscriptions', {
+          actorUser,
+          query: {
+            page: filters.page || 1,
+            limit: Math.min(Number(filters.limit || 100), 100),
+            status: apiStatus,
+            planId:
+              filters.planId && filters.planId !== 'all'
+                ? filters.planId
+                : undefined,
+            customerId: filters.customerId || undefined,
+            search: filters.search ? filters.search.trim() : undefined,
+          },
+        });
+        const rows = Array.isArray(listRes)
+          ? listRes
+          : listRes?.subscriptions || [];
+
+        const hydrated = await Promise.all(
+          rows.map(async (row) => {
+            try {
+              const [detailRes, histRes] = await Promise.all([
+                Array.isArray(row.items)
+                  ? Promise.resolve({ subscription: row })
+                  : apiClient.get(`/api/subscriptions/${row.id}`, {
+                      actorUser,
+                    }),
+                apiClient
+                  .get(`/api/subscriptions/${row.id}/history`, { actorUser })
+                  .catch(() => ({ history: [] })),
+              ]);
+              return normalizeSubscription(
+                mapApiSubscriptionToRaw(
+                  detailRes?.subscription || detailRes,
+                  histRes?.history || []
+                )
+              );
+            } catch {
+              return normalizeSubscription(mapApiSubscriptionToRaw(row, []));
+            }
+          })
+        );
+
+        const cleanApiSubs = hydrated.filter(Boolean);
+        // Preserve any locally created self-service checkout subscriptions alongside live backend UUID rows
+        const localOnlySubs = readUnifiedSubscriptions().filter(
+          (s) => !isUuid(s.id)
+        );
+        const combined = [...cleanApiSubs, ...localOnlySubs];
+
+        const isUnfiltered =
+          (!filters.status || filters.status === 'all') &&
+          (!filters.planId || filters.planId === 'all') &&
+          !filters.customerId &&
+          !filters.search;
+        if (isUnfiltered) {
+          saveUnifiedSubscriptions(combined);
+        } else {
+          cleanApiSubs.forEach((s) => upsertUnifiedSubscription(s));
+        }
+
+        return filterLocalSubscriptions(combined, filters);
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    const all = readUnifiedSubscriptions();
+    return filterLocalSubscriptions(all, filters);
   },
 
   /**
-   * Create a new subscription or quotation (supports Quotation Templates and multi-product lines).
+   * 41. GET /api/subscriptions/{subscriptionId}
+   * (+ 51. GET /api/subscriptions/{subscriptionId}/history)
+   */
+  async getSubscriptionById(subscriptionId, actorUser = null) {
+    if (resolveCompanyUserId(actorUser) && isUuid(subscriptionId)) {
+      try {
+        const [detailRes, histRes] = await Promise.all([
+          apiClient.get(`/api/subscriptions/${subscriptionId}`, { actorUser }),
+          apiClient
+            .get(`/api/subscriptions/${subscriptionId}/history`, { actorUser })
+            .catch(() => ({ history: [] })),
+        ]);
+        const raw = mapApiSubscriptionToRaw(
+          detailRes?.subscription || detailRes,
+          histRes?.history || []
+        );
+        return upsertUnifiedSubscription(raw);
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          if (err.status === 404) return null;
+          throw err;
+        }
+      }
+    }
+
+    const found =
+      readUnifiedSubscriptions().find((s) => s.id === subscriptionId) || null;
+    if (
+      found &&
+      actorUser?.role === 'customer' &&
+      !belongsToCustomer(found, actorUser)
+    ) {
+      throw new Error('Unauthorized subscription access.');
+    }
+    return found;
+  },
+
+  /**
+   * 39. POST /api/subscriptions
+   * Supports Quotation Templates, multi-product lines, and optional initialStatus
+   * chaining (/quote #43 -> /confirm #44 -> /activate #45).
    */
   async createSubscription(payload, actorUser) {
-    await new Promise((r) => setTimeout(r, 90));
     if (!actorUser) {
       throw new Error('Authentication required.');
     }
-    const all = readUnifiedSubscriptions();
     const minQty = Number(payload.minQuantity) || 1;
     const planLabel = payload.planName || 'Standard Plan';
 
     let preparedLines = [];
-    if (Array.isArray(payload.lines) && payload.lines.length > 0) {
-      preparedLines = payload.lines.map((line, idx) => {
+    if (
+      Array.isArray(payload.items || payload.lines) &&
+      (payload.items || payload.lines).length > 0
+    ) {
+      const sourceLines = payload.items || payload.lines;
+      preparedLines = sourceLines.map((line, idx) => {
         const qty = Math.max(1, Number(line.quantity) || 1);
-        const uPrice = Math.max(0, Number(line.unitPrice) || 0);
-        const pName = line.productName || line.name || 'Product';
-        const vLabel = line.variantLabel || line.variant || '';
+        const uPrice = Math.max(
+          0,
+          Number(line.unitPrice ?? line.unit_price) || 0
+        );
+        const pName =
+          line.productName || line.product_name || line.name || 'Product';
+        const vLabel =
+          line.variantLabel || line.variant_name || line.variant || '';
         const desc = vLabel ? `${pName} (${vLabel})` : pName;
         return {
           id: line.id || `line_${Date.now()}_${idx}`,
-          productId: line.productId || '',
+          productId: line.productId || line.product_id || '',
           productName: pName,
           name: pName,
           description: desc,
-          variantId: line.variantId || '',
+          variantId: line.variantId || line.variant_id || '',
           variant: vLabel || null,
           variantExtraPrice: Number(line.variantExtraPrice) || 0,
           quantity: qty,
           unitPrice: uPrice,
           amount: Math.round(qty * uPrice * 100) / 100,
+          ...(Array.isArray(line.taxes)
+            ? { taxes: line.taxes }
+            : line.taxRatePercent !== undefined || line.taxRate !== undefined
+            ? { taxes: normalizeTaxesInput(line) }
+            : {}),
         };
       });
 
@@ -721,6 +1279,7 @@ export const operationsService = {
           productName,
           name: productName,
           description: lineDesc,
+          variantId: payload.variantId || '',
           variant: variantLabel || null,
           variantExtraPrice,
           quantity,
@@ -730,18 +1289,115 @@ export const operationsService = {
       ];
     }
 
-    const subtotal = Math.round(
-      preparedLines.reduce((sum, l) => sum + l.amount, 0) * 100
-    ) / 100;
     const leadLine = preparedLines[0];
-
     const today = new Date().toISOString().slice(0, 10);
     const startDate = payload.startDate || today;
     const billingPeriod = payload.billingPeriod || 'monthly';
     const nextBillingDate = addPeriodToDate(startDate, billingPeriod);
     const expiryDate = payload.expiryDate || nextBillingDate;
-
     const initialStatus = payload.initialStatus || 'draft';
+
+    // Live backend path when authenticated as a company user (Admin / Staff)
+    if (resolveCompanyUserId(actorUser)) {
+      try {
+        const customerIdNum = Number(payload.customerId);
+        const apiBody = {
+          customerId:
+            Number.isInteger(customerIdNum) && customerIdNum > 0
+              ? customerIdNum
+              : payload.customerId,
+          planId: payload.planId,
+          quantity: Math.max(
+            1,
+            Math.round(Number(payload.quantity ?? leadLine?.quantity) || 1)
+          ),
+          startDate,
+          expiryDate,
+          paymentTerms: payload.paymentTerms || 'Net 30',
+          items: preparedLines.map(buildApiSubscriptionItem),
+        };
+
+        const createRes = await apiClient.post('/api/subscriptions', apiBody, {
+          actorUser,
+        });
+        let apiSub = createRes?.subscription || createRes;
+
+        if (apiSub?.id) {
+          saveSubscriptionMeta(apiSub.id, {
+            customerId: apiSub.customer_id ?? payload.customerId,
+            customerName: (payload.customerName || apiSub.customer_name || '').trim(),
+            customerEmail: (payload.customerEmail || '').trim().toLowerCase(),
+            customerOrganization: (payload.customerOrganization || '').trim(),
+            planName: planLabel,
+            billingPeriod,
+            templateId: payload.templateId || '',
+            templateName: payload.templateName || '',
+            validityDays: payload.validityDays
+              ? Number(payload.validityDays)
+              : null,
+            preferredDiscountRuleId: payload.preferredDiscountRuleId || '',
+            paymentTerms: payload.paymentTerms || 'Net 30',
+            startDate,
+            expiryDate,
+            nextBillingDate,
+            planRules: {
+              autoCloseOnEnd: payload.planRules?.autoCloseOnEnd ?? true,
+              allowEarlyClose: payload.planRules?.allowEarlyClose ?? true,
+              allowPause: payload.planRules?.allowPause ?? true,
+              allowRenewal: payload.planRules?.allowRenewal ?? true,
+            },
+          });
+
+          // Chain requested initialStatus transitions through backend endpoints #43 -> #44 -> #45
+          if (
+            initialStatus === 'quotation' ||
+            initialStatus === 'confirmed' ||
+            initialStatus === 'active'
+          ) {
+            const qRes = await apiClient.post(
+              `/api/subscriptions/${apiSub.id}/quote`,
+              undefined,
+              { actorUser }
+            );
+            apiSub = qRes?.subscription || qRes;
+          }
+          if (initialStatus === 'confirmed' || initialStatus === 'active') {
+            const cRes = await apiClient.post(
+              `/api/subscriptions/${apiSub.id}/confirm`,
+              undefined,
+              { actorUser }
+            );
+            apiSub = cRes?.subscription || cRes;
+          }
+          if (initialStatus === 'active') {
+            const aRes = await apiClient.post(
+              `/api/subscriptions/${apiSub.id}/activate`,
+              undefined,
+              { actorUser }
+            );
+            apiSub = aRes?.subscription || aRes;
+          }
+
+          const histRes = await apiClient
+            .get(`/api/subscriptions/${apiSub.id}/history`, { actorUser })
+            .catch(() => ({ history: [] }));
+
+          return upsertUnifiedSubscription(
+            mapApiSubscriptionToRaw(apiSub, histRes?.history || [])
+          );
+        }
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    // Offline / Customer Self-Service Checkout fallback
+    const all = readUnifiedSubscriptions();
+    const subtotal =
+      Math.round(preparedLines.reduce((sum, l) => sum + l.amount, 0) * 100) /
+      100;
     const seq = 1001 + all.length;
 
     const templateSuffix = payload.templateName
@@ -767,7 +1423,11 @@ export const operationsService = {
           ? actorUser.customerId || actorUser.id
           : undefined) ||
         `cust_${Date.now()}`,
-      customerName: (payload.customerName || actorUser?.name || 'Customer').trim(),
+      customerName: (
+        payload.customerName ||
+        actorUser?.name ||
+        'Customer'
+      ).trim(),
       customerEmail: (payload.customerEmail || actorUser?.email || '')
         .trim()
         .toLowerCase(),
@@ -820,15 +1480,286 @@ export const operationsService = {
   },
 
   /**
+   * 42. PATCH /api/subscriptions/{subscriptionId}
+   * Updates startDate, expiryDate, and paymentTerms on draft or quotation subscriptions.
+   */
+  async updateSubscriptionDetails(
+    subscriptionId,
+    { startDate, expiryDate, paymentTerms },
+    actorUser
+  ) {
+    if (!actorUser) {
+      throw new Error('Authentication required.');
+    }
+
+    if (resolveCompanyUserId(actorUser) && isUuid(subscriptionId)) {
+      try {
+        const body = {};
+        if (startDate !== undefined) body.startDate = startDate || null;
+        if (expiryDate !== undefined) body.expiryDate = expiryDate || null;
+        if (paymentTerms !== undefined) body.paymentTerms = paymentTerms || null;
+
+        const res = await apiClient.patch(
+          `/api/subscriptions/${subscriptionId}`,
+          body,
+          { actorUser }
+        );
+        saveSubscriptionMeta(subscriptionId, {
+          ...(startDate !== undefined ? { startDate } : {}),
+          ...(expiryDate !== undefined ? { expiryDate } : {}),
+          ...(paymentTerms !== undefined ? { paymentTerms } : {}),
+        });
+        const histRes = await apiClient
+          .get(`/api/subscriptions/${subscriptionId}/history`, { actorUser })
+          .catch(() => ({ history: [] }));
+        return upsertUnifiedSubscription(
+          mapApiSubscriptionToRaw(
+            res?.subscription || res,
+            histRes?.history || []
+          )
+        );
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    const all = readUnifiedSubscriptions();
+    const idx = all.findIndex((s) => s.id === subscriptionId);
+    if (idx === -1) throw new Error('Subscription not found.');
+    if (all[idx].status !== 'draft' && all[idx].status !== 'quotation') {
+      throw new Error('Only draft or quotation subscriptions can be updated.');
+    }
+    const updated = normalizeSubscription({
+      ...all[idx],
+      ...(startDate !== undefined ? { startDate } : {}),
+      ...(expiryDate !== undefined ? { expiryDate } : {}),
+      ...(paymentTerms !== undefined ? { paymentTerms } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    all[idx] = updated;
+    saveUnifiedSubscriptions(all);
+    return updated;
+  },
+
+  /**
+   * 47. GET /api/subscriptions/{subscriptionId}/items
+   */
+  async getSubscriptionItems(subscriptionId, actorUser = null) {
+    if (resolveCompanyUserId(actorUser) && isUuid(subscriptionId)) {
+      try {
+        const res = await apiClient.get(
+          `/api/subscriptions/${subscriptionId}/items`,
+          { actorUser }
+        );
+        return Array.isArray(res) ? res : res?.items || [];
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+    const sub = readUnifiedSubscriptions().find((s) => s.id === subscriptionId);
+    return sub?.lineItems || [];
+  },
+
+  /**
+   * 48. POST /api/subscriptions/{subscriptionId}/items (Draft status only)
+   */
+  async addSubscriptionItem(subscriptionId, itemData, actorUser = null) {
+    if (resolveCompanyUserId(actorUser) && isUuid(subscriptionId)) {
+      try {
+        await apiClient.post(
+          `/api/subscriptions/${subscriptionId}/items`,
+          buildApiSubscriptionItem(itemData),
+          { actorUser }
+        );
+        saveSubscriptionMeta(subscriptionId, { seatOverrideLines: null });
+        return this.getSubscriptionById(subscriptionId, actorUser);
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    const all = readUnifiedSubscriptions();
+    const idx = all.findIndex((s) => s.id === subscriptionId);
+    if (idx === -1) throw new Error('Subscription not found.');
+    if (all[idx].status !== 'draft') {
+      throw new Error('Only draft subscriptions can receive items.');
+    }
+    const nextLines = [
+      ...(all[idx].lineItems || []),
+      {
+        id: `line_${Date.now()}`,
+        productId: itemData.productId || '',
+        productName: itemData.productName || 'Product',
+        name: itemData.productName || 'Product',
+        variantId: itemData.variantId || '',
+        variant: itemData.variantLabel || itemData.variant || null,
+        quantity: Math.max(1, Number(itemData.quantity) || 1),
+        unitPrice: Math.max(0, Number(itemData.unitPrice) || 0),
+        taxes: normalizeTaxesInput(itemData),
+      },
+    ];
+    all[idx] = normalizeSubscription({
+      ...all[idx],
+      lineItems: nextLines,
+      updatedAt: new Date().toISOString(),
+    });
+    saveUnifiedSubscriptions(all);
+    return all[idx];
+  },
+
+  /**
+   * 49. PATCH /api/subscriptions/{subscriptionId}/items/{itemId} (Draft status only)
+   */
+  async updateSubscriptionItem(
+    subscriptionId,
+    itemId,
+    itemData,
+    actorUser = null
+  ) {
+    if (
+      resolveCompanyUserId(actorUser) &&
+      isUuid(subscriptionId) &&
+      isUuid(itemId)
+    ) {
+      try {
+        const body = {};
+        if (itemData.quantity !== undefined) {
+          body.quantity = Math.max(1, Number(itemData.quantity) || 1);
+        }
+        if (itemData.unitPrice !== undefined) {
+          body.unitPrice = Math.max(0, Number(itemData.unitPrice) || 0);
+        }
+        if (
+          itemData.taxes !== undefined ||
+          itemData.taxRatePercent !== undefined ||
+          itemData.taxRate !== undefined
+        ) {
+          body.taxes = normalizeTaxesInput(itemData);
+        }
+        await apiClient.patch(
+          `/api/subscriptions/${subscriptionId}/items/${itemId}`,
+          body,
+          { actorUser }
+        );
+        saveSubscriptionMeta(subscriptionId, { seatOverrideLines: null });
+        return this.getSubscriptionById(subscriptionId, actorUser);
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    const all = readUnifiedSubscriptions();
+    const idx = all.findIndex((s) => s.id === subscriptionId);
+    if (idx === -1) throw new Error('Subscription not found.');
+    if (all[idx].status !== 'draft') {
+      throw new Error('Only draft subscription items can be updated.');
+    }
+    const nextLines = (all[idx].lineItems || []).map((l) =>
+      l.id === itemId
+        ? {
+            ...l,
+            ...(itemData.quantity !== undefined
+              ? { quantity: Math.max(1, Number(itemData.quantity) || 1) }
+              : {}),
+            ...(itemData.unitPrice !== undefined
+              ? { unitPrice: Math.max(0, Number(itemData.unitPrice) || 0) }
+              : {}),
+            ...(itemData.taxes !== undefined ||
+            itemData.taxRatePercent !== undefined
+              ? { taxes: normalizeTaxesInput(itemData) }
+              : {}),
+          }
+        : l
+    );
+    all[idx] = normalizeSubscription({
+      ...all[idx],
+      lineItems: nextLines,
+      updatedAt: new Date().toISOString(),
+    });
+    saveUnifiedSubscriptions(all);
+    return all[idx];
+  },
+
+  /**
+   * 50. DELETE /api/subscriptions/{subscriptionId}/items/{itemId} (Draft status only)
+   */
+  async removeSubscriptionItem(subscriptionId, itemId, actorUser = null) {
+    if (
+      resolveCompanyUserId(actorUser) &&
+      isUuid(subscriptionId) &&
+      isUuid(itemId)
+    ) {
+      try {
+        await apiClient.delete(
+          `/api/subscriptions/${subscriptionId}/items/${itemId}`,
+          { actorUser }
+        );
+        saveSubscriptionMeta(subscriptionId, { seatOverrideLines: null });
+        return this.getSubscriptionById(subscriptionId, actorUser);
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    const all = readUnifiedSubscriptions();
+    const idx = all.findIndex((s) => s.id === subscriptionId);
+    if (idx === -1) throw new Error('Subscription not found.');
+    if (all[idx].status !== 'draft') {
+      throw new Error('Only draft subscription items can be removed.');
+    }
+    const nextLines = (all[idx].lineItems || []).filter((l) => l.id !== itemId);
+    all[idx] = normalizeSubscription({
+      ...all[idx],
+      lineItems: nextLines,
+      updatedAt: new Date().toISOString(),
+    });
+    saveUnifiedSubscriptions(all);
+    return all[idx];
+  },
+
+  /**
+   * 51. GET /api/subscriptions/{subscriptionId}/history
+   */
+  async getSubscriptionHistory(subscriptionId, actorUser = null) {
+    if (resolveCompanyUserId(actorUser) && isUuid(subscriptionId)) {
+      try {
+        const res = await apiClient.get(
+          `/api/subscriptions/${subscriptionId}/history`,
+          { actorUser }
+        );
+        const rows = Array.isArray(res) ? res : res?.history || [];
+        return mapApiHistoryRows(rows);
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+    const sub = readUnifiedSubscriptions().find((s) => s.id === subscriptionId);
+    return sub?.history || [];
+  },
+
+  /**
    * Update seat quantities / product lines and discount preference on a non-closed subscription
    * (e.g. when a customer asks for a better price for taking more seats).
+   * If the subscription is a backend Draft subscription and actor is a company user,
+   * also syncs item quantities/prices via 49. PATCH /api/subscriptions/{id}/items/{itemId}.
    */
   async updateSubscriptionSeatsAndDiscount(
     id,
     { lines, preferredDiscountRuleId },
     actorUser
   ) {
-    await new Promise((r) => setTimeout(r, 70));
     if (!actorUser) {
       throw new Error('Authentication required.');
     }
@@ -844,7 +1775,9 @@ export const operationsService = {
       actorUser.role === 'customer' &&
       !belongsToCustomer(existing, actorUser)
     ) {
-      throw new Error('You do not have permission to modify this subscription.');
+      throw new Error(
+        'You do not have permission to modify this subscription.'
+      );
     }
     if (existing.status === 'closed') {
       throw new Error('Closed subscriptions cannot be modified.');
@@ -863,8 +1796,9 @@ export const operationsService = {
             const vLabel = line.variantLabel ?? line.variant ?? '';
             const desc = vLabel ? `${pName} (${vLabel})` : pName;
             return {
+              ...origLine,
               ...line,
-              id: line.id || `line_${Date.now()}_${lIdx}`,
+              id: line.id || origLine.id || `line_${Date.now()}_${lIdx}`,
               productId: line.productId || origLine.productId || '',
               productName: pName,
               name: pName,
@@ -877,14 +1811,42 @@ export const operationsService = {
           })
         : existing.lineItems;
 
-    const leadLine = nextLines[0] || existing.lineItems?.[0];
-    const nowIso = new Date().toISOString();
     const nextRulePref =
       actorUser.role === 'customer'
         ? existing.preferredDiscountRuleId || ''
         : preferredDiscountRuleId !== undefined
         ? preferredDiscountRuleId
         : existing.preferredDiscountRuleId || '';
+
+    // Sync Draft item edits directly to backend endpoint #49 when online
+    if (
+      resolveCompanyUserId(actorUser) &&
+      isUuid(id) &&
+      existing.status === 'draft'
+    ) {
+      try {
+        for (const nl of nextLines) {
+          if (nl.id && isUuid(nl.id)) {
+            await apiClient.patch(
+              `/api/subscriptions/${id}/items/${nl.id}`,
+              {
+                quantity: nl.quantity,
+                unitPrice: nl.unitPrice,
+                ...(Array.isArray(nl.taxes) ? { taxes: nl.taxes } : {}),
+              },
+              { actorUser }
+            );
+          }
+        }
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
+    const leadLine = nextLines[0] || existing.lineItems?.[0];
+    const nowIso = new Date().toISOString();
 
     const normalized = normalizeSubscription({
       ...existing,
@@ -905,16 +1867,27 @@ export const operationsService = {
         ? ` — ${normalized.discountLabel} active`
         : '';
 
-    normalized.history = [
-      ...(existing.history || []),
-      {
-        id: `evt_seats_${Date.now()}`,
-        status: normalized.status,
-        label: `Updated seats/pricing (${totalSeats} total qty)${discountNote}`,
-        actor: actorUser.name || actorUser.email || 'Operator',
-        timestamp: nowIso,
-      },
-    ];
+    const seatEvent = {
+      id: `evt_seats_${Date.now()}`,
+      status: normalized.status,
+      label: `Updated seats/pricing (${totalSeats} total qty)${discountNote}`,
+      actor: actorUser.name || actorUser.email || 'Operator',
+      timestamp: nowIso,
+    };
+
+    normalized.history = [...(existing.history || []), seatEvent];
+
+    if (isUuid(id)) {
+      const prevMeta = getSubscriptionMetaMap()[id] || {};
+      saveSubscriptionMeta(id, {
+        preferredDiscountRuleId: nextRulePref,
+        appliedDiscountRuleId: '',
+        ...(existing.status !== 'draft'
+          ? { seatOverrideLines: nextLines }
+          : { seatOverrideLines: null }),
+        localEvents: [...(prevMeta.localEvents || []), seatEvent],
+      });
+    }
 
     all[idx] = normalized;
     saveUnifiedSubscriptions(all);
@@ -923,28 +1896,92 @@ export const operationsService = {
 
   /**
    * Transition a subscription state according to lifecycle and plan switches.
+   * Calls live backend endpoints #43 (/quote), #44 (/confirm), #45 (/activate), #46 (/close).
    */
   async transitionSubscription(id, action, actorUser) {
-    await new Promise((r) => setTimeout(r, 80));
     if (!actorUser) {
       throw new Error('Authentication required.');
     }
     const all = readUnifiedSubscriptions();
     const idx = all.findIndex((s) => s.id === id);
+    const existing = idx >= 0 ? all[idx] : null;
+
+    if (
+      existing &&
+      actorUser.role === 'customer' &&
+      !belongsToCustomer(existing, actorUser)
+    ) {
+      throw new Error(
+        'You do not have permission to modify this subscription.'
+      );
+    }
+
+    // Enforce plan early-close policy before calling /close
+    if (action === 'close' && existing) {
+      const today = new Date().toISOString().slice(0, 10);
+      const isBeforeExpiry = !existing.expiryDate || today < existing.expiryDate;
+      if (
+        existing.status === 'active' &&
+        isBeforeExpiry &&
+        !existing.planRules?.allowEarlyClose &&
+        actorUser.role !== 'admin'
+      ) {
+        throw new Error(
+          'This plan does not permit early closure before its expiry date.'
+        );
+      }
+    }
+
+    const backendEndpointByAction = {
+      quote: 'quote',
+      send_quotation: 'quote',
+      confirm: 'confirm',
+      activate: 'activate',
+      close: 'close',
+    };
+    const backendSlug = backendEndpointByAction[action];
+
+    if (resolveCompanyUserId(actorUser) && isUuid(id) && backendSlug) {
+      try {
+        if (action === 'confirm' && existing?.status === 'draft') {
+          await apiClient.post(`/api/subscriptions/${id}/quote`, undefined, {
+            actorUser,
+          });
+        }
+        const res = await apiClient.post(
+          `/api/subscriptions/${id}/${backendSlug}`,
+          undefined,
+          { actorUser }
+        );
+        if (action === 'activate' || action === 'close') {
+          saveSubscriptionMeta(id, { isPaused: false });
+        }
+        const histRes = await apiClient
+          .get(`/api/subscriptions/${id}/history`, { actorUser })
+          .catch(() => ({ history: [] }));
+        return upsertUnifiedSubscription(
+          mapApiSubscriptionToRaw(
+            res?.subscription || res,
+            histRes?.history || []
+          )
+        );
+      } catch (err) {
+        if (!isNetworkOfflineError(err)) {
+          throw err;
+        }
+      }
+    }
+
     if (idx === -1) {
       throw new Error('Subscription not found.');
     }
 
     const sub = { ...all[idx] };
-
-    if (actorUser.role === 'customer' && !belongsToCustomer(sub, actorUser)) {
-      throw new Error('You do not have permission to modify this subscription.');
-    }
-
     let eventLabel = '';
     const actorName = actorUser.name || actorUser.email || 'Operator';
 
     switch (action) {
+      case 'quote':
       case 'send_quotation': {
         if (sub.status !== 'draft') {
           throw new Error('Only Draft records can be sent as a Quotation.');
@@ -999,25 +2036,16 @@ export const operationsService = {
         sub.status = 'active';
         sub.isPaused = false;
         sub.expiryDate = addPeriodToDate(sub.expiryDate, sub.billingPeriod);
-        sub.nextBillingDate = addPeriodToDate(sub.nextBillingDate, sub.billingPeriod);
+        sub.nextBillingDate = addPeriodToDate(
+          sub.nextBillingDate,
+          sub.billingPeriod
+        );
         eventLabel = `Renewed through ${sub.expiryDate}`;
         break;
       }
       case 'close': {
         if (sub.status === 'closed') {
           throw new Error('Subscription is already closed.');
-        }
-        const today = new Date().toISOString().slice(0, 10);
-        const isBeforeExpiry = !sub.expiryDate || today < sub.expiryDate;
-        if (
-          sub.status === 'active' &&
-          isBeforeExpiry &&
-          !sub.planRules?.allowEarlyClose &&
-          actorUser.role !== 'admin'
-        ) {
-          throw new Error(
-            'This plan does not permit early closure before its expiry date.'
-          );
         }
         sub.status = 'closed';
         sub.isPaused = false;
@@ -1029,16 +2057,24 @@ export const operationsService = {
     }
 
     sub.updatedAt = new Date().toISOString();
-    sub.history = [
-      ...(sub.history || []),
-      {
-        id: `evt_${Date.now()}`,
-        status: sub.status,
-        label: eventLabel,
-        actor: actorName,
-        timestamp: sub.updatedAt,
-      },
-    ];
+    const localEvt = {
+      id: `evt_${Date.now()}`,
+      status: sub.status,
+      label: eventLabel,
+      actor: actorName,
+      timestamp: sub.updatedAt,
+    };
+    sub.history = [...(sub.history || []), localEvt];
+
+    if (isUuid(id)) {
+      const prevMeta = getSubscriptionMetaMap()[id] || {};
+      saveSubscriptionMeta(id, {
+        isPaused: sub.isPaused,
+        expiryDate: sub.expiryDate,
+        nextBillingDate: sub.nextBillingDate,
+        localEvents: [...(prevMeta.localEvents || []), localEvt],
+      });
+    }
 
     all[idx] = sub;
     saveUnifiedSubscriptions(all);
@@ -1050,7 +2086,6 @@ export const operationsService = {
    * Customers strictly receive only their own confirmed, paid, or sent invoices.
    */
   async getInvoices(actorUser) {
-    await new Promise((r) => setTimeout(r, 50));
     if (!actorUser) return [];
     const all = readUnifiedInvoices();
     if (actorUser.role === 'customer') {
@@ -1058,7 +2093,9 @@ export const operationsService = {
         (inv) =>
           belongsToCustomer(inv, actorUser) &&
           inv.status !== 'cancelled' &&
-          (inv.status === 'confirmed' || inv.status === 'paid' || Boolean(inv.sentAt))
+          (inv.status === 'confirmed' ||
+            inv.status === 'paid' ||
+            Boolean(inv.sentAt))
       );
     }
     return all;
@@ -1066,11 +2103,12 @@ export const operationsService = {
 
   /**
    * Generate a single Draft invoice for an active subscription for its current billing cycle.
-   * Automatically populates customer details, product lines, taxes from Admin rules, and totals.
-   * Prevents duplicate billing for the same cycle key.
    */
-  async generateInvoiceForSubscription(subscriptionId, actorUser, options = {}) {
-    await new Promise((r) => setTimeout(r, 80));
+  async generateInvoiceForSubscription(
+    subscriptionId,
+    actorUser,
+    options = {}
+  ) {
     const subs = readUnifiedSubscriptions();
     const subIdx = subs.findIndex((s) => s.id === subscriptionId);
     if (subIdx === -1) {
@@ -1079,7 +2117,9 @@ export const operationsService = {
 
     const sub = subs[subIdx];
     if (sub.status !== 'active') {
-      throw new Error('Invoices can only be generated for Active subscriptions.');
+      throw new Error(
+        'Invoices can only be generated for Active subscriptions.'
+      );
     }
     if (sub.isPaused) {
       throw new Error('Paused subscriptions are skipped until resumed.');
@@ -1112,6 +2152,11 @@ export const operationsService = {
         ...sub,
         appliedDiscountRuleId: newInvoice.discountRuleId,
       };
+      if (isUuid(sub.id)) {
+        saveSubscriptionMeta(sub.id, {
+          appliedDiscountRuleId: newInvoice.discountRuleId,
+        });
+      }
       saveUnifiedSubscriptions(subs);
     }
 
@@ -1122,28 +2167,44 @@ export const operationsService = {
 
   /**
    * Billing Day Run:
-   * Automatically generates Draft invoices across all eligible active, unpaused subscriptions,
-   * pre-filling customer details, product & variant lines, automatic discounts, automatic taxes
-   * from Admin rules, and totals. Guarantees nothing is billed twice or unexpectedly skipped.
+   * Automatically generates Draft invoices across all eligible active, unpaused subscriptions.
    */
   async runBilling(actorUser, options = {}) {
-    await new Promise((r) => setTimeout(r, 140));
+    if (resolveCompanyUserId(actorUser)) {
+      try {
+        await this.getSubscriptions(actorUser);
+      } catch {
+        // proceed with cached subscriptions if offline
+      }
+    }
+
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const runs = readRawArray(BILLING_RUNS_KEY);
     const productsById = getProductsMap();
     const today = options.billingDate || new Date().toISOString().slice(0, 10);
 
-    // Enforce autoCloseOnEnd for any active subscription past its end date before billing
     let subsModified = false;
     let autoClosedCount = 0;
-    subs.forEach((sub, idx) => {
+    for (let idx = 0; idx < subs.length; idx += 1) {
+      const sub = subs[idx];
       if (
         sub.status === 'active' &&
         sub.planRules?.autoCloseOnEnd &&
         sub.expiryDate &&
         sub.expiryDate < today
       ) {
+        if (resolveCompanyUserId(actorUser) && isUuid(sub.id)) {
+          try {
+            await apiClient.post(
+              `/api/subscriptions/${sub.id}/close`,
+              undefined,
+              { actorUser }
+            );
+          } catch {
+            // continue local auto-close update if offline
+          }
+        }
         subs[idx] = {
           ...sub,
           status: 'closed',
@@ -1163,13 +2224,15 @@ export const operationsService = {
         subsModified = true;
         autoClosedCount += 1;
       }
-    });
+    }
 
     if (subsModified) {
       saveUnifiedSubscriptions(subs);
     }
 
-    const pausedCount = subs.filter((s) => s.status === 'active' && s.isPaused).length;
+    const pausedCount = subs.filter(
+      (s) => s.status === 'active' && s.isPaused
+    ).length;
     const eligible = subs.filter((s) => s.status === 'active' && !s.isPaused);
     let createdCount = 0;
     let skippedCount = 0;
@@ -1204,6 +2267,11 @@ export const operationsService = {
               ...subs[sIdx],
               appliedDiscountRuleId: draftInv.discountRuleId,
             };
+            if (isUuid(sub.id)) {
+              saveSubscriptionMeta(sub.id, {
+                appliedDiscountRuleId: draftInv.discountRuleId,
+              });
+            }
             subsDiscountLocked = true;
           }
         }
@@ -1251,15 +2319,10 @@ export const operationsService = {
   },
 
   async getBillingRuns() {
-    await new Promise((r) => setTimeout(r, 40));
     return readRawArray(BILLING_RUNS_KEY);
   },
 
-  /**
-   * Confirm or cancel an invoice (Draft -> Confirmed, or Cancel unpaid Draft/Confirmed).
-   */
   async updateInvoiceStatus(invoiceId, nextStatus) {
-    await new Promise((r) => setTimeout(r, 70));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const idx = invoices.findIndex((i) => i.id === invoiceId);
@@ -1301,11 +2364,7 @@ export const operationsService = {
     return this.updateInvoiceStatus(invoiceId, 'cancelled');
   },
 
-  /**
-   * Bulk-confirm all Draft invoices generated during Billing Day.
-   */
   async confirmAllDraftInvoices() {
-    await new Promise((r) => setTimeout(r, 90));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     let confirmedCount = 0;
@@ -1329,11 +2388,7 @@ export const operationsService = {
     return { confirmedCount };
   },
 
-  /**
-   * Send an invoice statement to the customer email and publish to their portal.
-   */
   async sendInvoice(invoiceId, actorUser) {
-    await new Promise((r) => setTimeout(r, 80));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const idx = invoices.findIndex((i) => i.id === invoiceId);
@@ -1358,11 +2413,7 @@ export const operationsService = {
     return inv;
   },
 
-  /**
-   * Record a payment against a Confirmed invoice (Confirmed -> Paid).
-   */
   async recordPayment(invoiceId, { amount, method, date, note }, actorUser) {
-    await new Promise((r) => setTimeout(r, 90));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const idx = invoices.findIndex((i) => i.id === invoiceId);
@@ -1379,7 +2430,9 @@ export const operationsService = {
       throw new Error('Cannot record payment on a cancelled invoice.');
     }
     if (inv.status === 'draft') {
-      throw new Error('Please confirm the Draft invoice before recording payment.');
+      throw new Error(
+        'Please confirm the Draft invoice before recording payment.'
+      );
     }
     if (inv.status === 'paid' || inv.amountDue <= 0) {
       throw new Error('Invoice is already settled in full.');
@@ -1393,7 +2446,9 @@ export const operationsService = {
       throw new Error('Payment amount must be greater than zero.');
     }
     if (payAmount > inv.amountDue + 0.005) {
-      throw new Error('Payment amount cannot exceed the remaining balance due.');
+      throw new Error(
+        'Payment amount cannot exceed the remaining balance due.'
+      );
     }
 
     const paymentRecord = {
@@ -1406,8 +2461,12 @@ export const operationsService = {
       createdAt: new Date().toISOString(),
     };
 
-    const nextPaid = Math.round((inv.amountPaid + paymentRecord.amount) * 100) / 100;
-    const nextDue = Math.max(0, Math.round((inv.total - nextPaid) * 100) / 100);
+    const nextPaid =
+      Math.round((inv.amountPaid + paymentRecord.amount) * 100) / 100;
+    const nextDue = Math.max(
+      0,
+      Math.round((inv.total - nextPaid) * 100) / 100
+    );
 
     inv.payments = [...(inv.payments || []), paymentRecord];
     inv.amountPaid = nextPaid;
@@ -1423,11 +2482,7 @@ export const operationsService = {
     return inv;
   },
 
-  /**
-   * Fetch all recorded payments across invoices with customer & invoice associations
-   */
   async getPayments(filters = {}, actorUser) {
-    await new Promise((r) => setTimeout(r, 60));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
 
@@ -1457,10 +2512,11 @@ export const operationsService = {
       }
     });
 
-    // Sort newest first
-    allPayments.sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
+    allPayments.sort(
+      (a, b) =>
+        new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt)
+    );
 
-    // Apply filtering
     const { method, search, fromDate, toDate } = filters;
     return allPayments.filter((p) => {
       if (method && method !== 'all' && p.method !== method) {
@@ -1480,7 +2536,14 @@ export const operationsService = {
         const matchesNote = p.note?.toLowerCase().includes(q);
         const matchesMethod = p.method?.toLowerCase().includes(q);
         const matchesId = p.id?.toLowerCase().includes(q);
-        if (!matchesInv && !matchesCust && !matchesOrg && !matchesNote && !matchesMethod && !matchesId) {
+        if (
+          !matchesInv &&
+          !matchesCust &&
+          !matchesOrg &&
+          !matchesNote &&
+          !matchesMethod &&
+          !matchesId
+        ) {
           return false;
         }
       }
@@ -1488,11 +2551,7 @@ export const operationsService = {
     });
   },
 
-  /**
-   * Get payments & receivables summary for "The money comes in" overview
-   */
   async getPaymentSummary(actorUser) {
-    await new Promise((r) => setTimeout(r, 40));
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
 
@@ -1513,19 +2572,19 @@ export const operationsService = {
 
     scopedInvoices.forEach((inv) => {
       if (inv.status === 'paid') {
-        paidCount++;
+        paidCount += 1;
       }
       if (inv.status === 'confirmed') {
-        confirmedCount++;
+        confirmedCount += 1;
         totalOutstanding += inv.amountDue || 0;
         if (inv.dueDate && inv.dueDate < todayStr && (inv.amountDue || 0) > 0) {
-          overdueCount++;
+          overdueCount += 1;
           overdueAmount += inv.amountDue || 0;
         }
       }
       if (Array.isArray(inv.payments)) {
         inv.payments.forEach((p) => {
-          paymentCount++;
+          paymentCount += 1;
           totalCollected += Number(p.amount) || 0;
         });
       }
@@ -1543,11 +2602,7 @@ export const operationsService = {
     };
   },
 
-  /**
-   * Send payment reminder for an overdue/outstanding invoice
-   */
-  async sendPaymentReminder(invoiceId, actorUser) {
-    await new Promise((r) => setTimeout(r, 80));
+  async sendPaymentReminder(invoiceId) {
     const subs = readUnifiedSubscriptions();
     const invoices = readUnifiedInvoices(subs);
     const idx = invoices.findIndex((i) => i.id === invoiceId);

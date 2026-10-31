@@ -14,9 +14,13 @@ import {
   ChevronRight,
   Trash2,
   Tag,
+  Save,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { authService } from '../../services/authService';
+import { resolveCompanyUserId } from '../../api/client';
+import QuotationManagement from './QuotationManagement';
+import CustomerPicker from './CustomerPicker';
 import { productService } from '../../api/services/productService';
 import { planService } from '../../api/services/planService';
 import { taxService, calculateTaxesFromRules } from '../../api/services/taxService';
@@ -87,13 +91,30 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
   const [seatDraftLines, setSeatDraftLines] = useState([]);
   const [seatDiscountRuleId, setSeatDiscountRuleId] = useState('');
 
+  const [viewMode, setViewMode] = useState('subscriptions');
+  const [planFilter, setPlanFilter] = useState('all');
+  const [detailsDraft, setDetailsDraft] = useState({
+    startDate: '',
+    expiryDate: '',
+    paymentTerms: '',
+  });
+  const [newItem, setNewItem] = useState({
+    productId: '',
+    variantId: '',
+    quantity: 1,
+    unitPrice: 0,
+    taxRate: 18,
+  });
+
+  const isLiveCompanyUser = Boolean(resolveCompanyUserId(user));
+
   const today = new Date().toISOString().slice(0, 10);
   const [formData, setFormData] = useState({
     templateId: '',
     templateName: '',
     validityDays: 15,
     preferredDiscountRuleId: '',
-    selectedCustomerId: '',
+    customerId: '',
     customerName: '',
     customerEmail: '',
     customerOrganization: '',
@@ -118,29 +139,53 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
         discData,
         custsData,
       ] = await Promise.all([
-        operationsService.getSubscriptions(user),
+        operationsService.getSubscriptions(user, {
+          planId: planFilter !== 'all' ? planFilter : undefined,
+        }),
         productService.getProducts(),
         planService.getPlans(),
-        quotationTemplateService.getTemplates(),
+        quotationTemplateService.getTemplates({}, user),
         taxService.getTaxRules(),
         discountService.getDiscountRules(),
         authService.getCustomers(),
       ]);
-      setSubscriptions(subsData);
-      setProducts(prodsData);
-      setPlans(plansData);
-      setTemplates(tmplsData);
-      setTaxRules(rulesData);
-      setDiscountRules(discData);
-      setCustomers(custsData);
+      setSubscriptions(subsData || []);
+      setProducts(prodsData || []);
+      setPlans(plansData || []);
+      setTemplates(tmplsData || []);
+      setTaxRules(rulesData || []);
+      setDiscountRules(discData || []);
+      setCustomers(custsData || []);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, planFilter]);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (selectedSub) {
+      setDetailsDraft({
+        startDate: selectedSub.startDate
+          ? String(selectedSub.startDate).slice(0, 10)
+          : '',
+        expiryDate: selectedSub.expiryDate
+          ? String(selectedSub.expiryDate).slice(0, 10)
+          : '',
+        paymentTerms: selectedSub.paymentTerms || 'Net 15',
+      });
+      const firstProd = products[0];
+      setNewItem({
+        productId: firstProd?.id || '',
+        variantId: firstProd?.variants?.[0]?.id || '',
+        quantity: 1,
+        unitPrice: Number(firstProd?.salesPrice) || 0,
+        taxRate: 18,
+      });
+    }
+  }, [selectedSub, products]);
 
   const productsById = useMemo(() => {
     const map = new Map();
@@ -267,7 +312,7 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
         templateName: firstTemplate.name,
         validityDays: vDays,
         preferredDiscountRuleId: '',
-        selectedCustomerId: '',
+        customerId: '',
         customerName: '',
         customerEmail: '',
         customerOrganization: '',
@@ -287,7 +332,7 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
         templateName: '',
         validityDays: 15,
         preferredDiscountRuleId: '',
-        selectedCustomerId: '',
+        customerId: '',
         customerName: '',
         customerEmail: '',
         customerOrganization: '',
@@ -343,24 +388,8 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
     }));
   };
 
-  const handleCustomerPick = (custId) => {
-    if (!custId) {
-      setFormData((prev) => ({
-        ...prev,
-        selectedCustomerId: '',
-      }));
-      return;
-    }
-    const found = customers.find((c) => c.id === custId);
-    if (found) {
-      setFormData((prev) => ({
-        ...prev,
-        selectedCustomerId: found.id,
-        customerName: found.name || '',
-        customerEmail: found.email || '',
-        customerOrganization: found.organization || '',
-      }));
-    }
+  const handleCustomerChange = (patch) => {
+    setFormData((prev) => ({ ...prev, ...patch }));
   };
 
   const handlePlanPick = (planId) => {
@@ -510,7 +539,9 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
 
     const matchedCust = customers.find(
       (c) =>
-        c.id === formData.selectedCustomerId ||
+        (formData.customerId &&
+          (c.id === formData.customerId ||
+            c.customerId === formData.customerId)) ||
         c.email?.toLowerCase() === formData.customerEmail.trim().toLowerCase()
     );
 
@@ -522,7 +553,11 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
           templateName: formData.templateName || '',
           validityDays: formData.templateId ? formData.validityDays : null,
           preferredDiscountRuleId: formData.preferredDiscountRuleId || '',
-          customerId: matchedCust?.customerId || matchedCust?.id || undefined,
+          customerId:
+            formData.customerId ||
+            matchedCust?.customerId ||
+            matchedCust?.id ||
+            undefined,
           customerName: formData.customerName,
           customerEmail: formData.customerEmail,
           customerOrganization: formData.customerOrganization,
@@ -556,6 +591,85 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
       showToast(err.message || 'Could not create quotation.', 'error');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveDetailsDraft = async () => {
+    if (!selectedSub) return;
+    setActionLoading(true);
+    try {
+      const updated = await operationsService.updateSubscriptionDetails(
+        selectedSub.id,
+        detailsDraft,
+        user
+      );
+      setSelectedSub(updated);
+      showToast('Subscription dates and terms updated.', 'success');
+      await loadAll();
+    } catch (err) {
+      showToast(err.message || 'Could not update subscription terms.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAddDraftItem = async (e) => {
+    e?.preventDefault();
+    if (!selectedSub || selectedSub.status !== 'draft') return;
+    if (!newItem.productId) {
+      showToast('Select a product to add.', 'error');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const prod = products.find((p) => p.id === newItem.productId);
+      const pickedVar = prod?.variants?.find((v) => v.id === newItem.variantId);
+      const updated = await operationsService.addSubscriptionItem(
+        selectedSub.id,
+        {
+          productId: newItem.productId,
+          productName: prod?.name || 'Product',
+          variantId: newItem.variantId || undefined,
+          variant: pickedVar
+            ? `${pickedVar.attribute}: ${pickedVar.value}`
+            : undefined,
+          quantity: Math.max(1, Number(newItem.quantity) || 1),
+          unitPrice: Math.max(0, Number(newItem.unitPrice) || 0),
+          taxes: [
+            {
+              name: 'VAT',
+              rate: Number(newItem.taxRate) || 18,
+            },
+          ],
+        },
+        user
+      );
+      setSelectedSub(updated);
+      showToast('Item added to draft subscription.', 'success');
+      await loadAll();
+    } catch (err) {
+      showToast(err.message || 'Could not add item.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRemoveDraftItem = async (itemId) => {
+    if (!selectedSub || selectedSub.status !== 'draft') return;
+    setActionLoading(true);
+    try {
+      const updated = await operationsService.removeSubscriptionItem(
+        selectedSub.id,
+        itemId,
+        user
+      );
+      setSelectedSub(updated);
+      showToast('Item removed from draft subscription.', 'success');
+      await loadAll();
+    } catch (err) {
+      showToast(err.message || 'Could not remove item.', 'error');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -689,6 +803,8 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
   const filteredSubs = subscriptions.filter((sub) => {
     const matchesStatus =
       statusFilter === 'all' || sub.status === statusFilter;
+    const matchesPlan =
+      planFilter === 'all' || sub.planId === planFilter;
     const q = searchQuery.trim().toLowerCase();
     const matchesSearch =
       !q ||
@@ -697,7 +813,7 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
       sub.customerEmail?.toLowerCase().includes(q) ||
       sub.planName?.toLowerCase().includes(q) ||
       sub.templateName?.toLowerCase().includes(q);
-    return matchesStatus && matchesSearch;
+    return matchesStatus && matchesPlan && matchesSearch;
   });
 
   const canCloseActiveSub = (sub) => {
@@ -720,55 +836,102 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
             Prepare offers from quotation templates and track every subscription from Draft to Quotation, Confirmed, Active, and Closed.
           </p>
         </div>
-        <Button variant="primary" icon={Plus} onClick={handleOpenCreate}>
-          New Quotation
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-100 p-1">
+            <button
+              type="button"
+              onClick={() => setViewMode('subscriptions')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                viewMode === 'subscriptions'
+                  ? 'bg-white text-zinc-900 shadow-2xs'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              Subscriptions ({subscriptions.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('quotations')}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                viewMode === 'quotations'
+                  ? 'bg-white text-zinc-900 shadow-2xs'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              Quotations (QUO-...)
+            </button>
+          </div>
+          {viewMode === 'subscriptions' && (
+            <Button variant="primary" icon={Plus} onClick={handleOpenCreate}>
+              New Subscription
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Filter & Status Bar */}
-      <div className="bg-white p-3.5 rounded-xl border border-zinc-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
-          {STATUS_TABS.map((tab) => {
-            const count =
-              tab.id === 'all'
-                ? subscriptions.length
-                : subscriptions.filter((s) => s.status === tab.id).length;
-            const active = statusFilter === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setStatusFilter(tab.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-                  active
-                    ? 'bg-zinc-900 text-white'
-                    : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
-                }`}
+      {viewMode === 'quotations' ? (
+        <QuotationManagement onConverted={loadAll} />
+      ) : (
+        <>
+          {/* Filter & Status Bar */}
+          <div className="bg-white p-3.5 rounded-xl border border-zinc-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
+              {STATUS_TABS.map((tab) => {
+                const count =
+                  tab.id === 'all'
+                    ? subscriptions.length
+                    : subscriptions.filter((s) => s.status === tab.id).length;
+                const active = statusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setStatusFilter(tab.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                      active
+                        ? 'bg-zinc-900 text-white'
+                        : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100'
+                    }`}
+                  >
+                    {tab.label}{' '}
+                    <span
+                      className={`ml-1 tabular-nums ${
+                        active ? 'text-zinc-300' : 'text-zinc-400'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={planFilter}
+                onChange={(e) => setPlanFilter(e.target.value)}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-zinc-200 bg-white text-zinc-700 focus:outline-none focus:border-zinc-900"
               >
-                {tab.label}{' '}
-                <span
-                  className={`ml-1 tabular-nums ${
-                    active ? 'text-zinc-300' : 'text-zinc-400'
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                <option value="all">All Plans ({plans.length})</option>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
 
-        <div className="relative w-full md:w-72">
-          <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search number, customer, plan..."
-            className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/15 focus:border-zinc-900"
-          />
-        </div>
-      </div>
+              <div className="relative w-full md:w-64">
+                <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search number, customer, plan..."
+                  className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/15 focus:border-zinc-900"
+                />
+              </div>
+            </div>
+          </div>
 
       {/* Content */}
       {loading ? (
@@ -926,6 +1089,8 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
           </div>
         </div>
       )}
+      </>
+      )}
 
       {/* Create Quotation / Subscription Drawer */}
       <Drawer
@@ -994,53 +1159,25 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
             </div>
 
             {/* Customer Details */}
-            {customers.length > 0 && (
-              <Select
-                label="Existing Customer (Optional Quick Fill)"
-                placeholder="Enter customer details or select existing..."
-                value={formData.selectedCustomerId}
-                options={customers.map((c) => ({
-                  value: c.id,
-                  label: `${c.name} (${c.email})`,
-                }))}
-                onChange={(e) => handleCustomerPick(e.target.value)}
-              />
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <Input
-                label="Customer Name"
-                required
-                placeholder="Alex Morgan"
-                value={formData.customerName}
-                error={formErrors.customerName}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, customerName: e.target.value }))
-                }
-              />
-              <Input
-                label="Customer Email"
-                type="email"
-                required
-                placeholder="alex@acmecorp.com"
-                value={formData.customerEmail}
-                error={formErrors.customerEmail}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, customerEmail: e.target.value }))
-                }
-              />
-            </div>
-
-            <Input
-              label="Customer Organization"
-              placeholder="Acme Corp"
-              value={formData.customerOrganization}
-              onChange={(e) =>
-                setFormData((p) => ({
-                  ...p,
-                  customerOrganization: e.target.value,
-                }))
-              }
+            <CustomerPicker
+              value={{
+                customerId: formData.customerId,
+                customerName: formData.customerName,
+                customerEmail: formData.customerEmail,
+                customerOrganization: formData.customerOrganization,
+              }}
+              customers={customers}
+              onChange={handleCustomerChange}
+              onCustomerRegistered={(newCust) => {
+                setCustomers((prev) => [newCust, ...prev]);
+                handleCustomerChange({
+                  customerId: newCust.customerId ?? newCust.id,
+                  customerName: newCust.name,
+                  customerEmail: newCust.email,
+                  customerOrganization: newCust.organization || '',
+                });
+              }}
+              errors={formErrors}
             />
 
             {/* Plan, Dates & Payment Terms */}
@@ -1590,6 +1727,144 @@ export default function SubscriptionManagement({ onInvoiceGenerated }) {
                 </div>
               </div>
             </div>
+
+            {/* Edit Dates & Payment Terms (Draft & Quotation stages) */}
+            {(selectedSub.status === 'draft' ||
+              selectedSub.status === 'quotation') && (
+              <div className="bg-white border border-zinc-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-semibold text-zinc-900">
+                      Edit Terms & Validity
+                    </div>
+                    <div className="text-[11px] text-zinc-500">
+                      Update start date, expiry date, or payment terms.
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={Save}
+                    loading={actionLoading}
+                    onClick={handleSaveDetailsDraft}
+                  >
+                    Save Terms
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Input
+                    label="Start Date"
+                    type="date"
+                    value={detailsDraft.startDate}
+                    onChange={(e) =>
+                      setDetailsDraft((p) => ({ ...p, startDate: e.target.value }))
+                    }
+                  />
+                  <Input
+                    label="Expiry Date"
+                    type="date"
+                    value={detailsDraft.expiryDate}
+                    onChange={(e) =>
+                      setDetailsDraft((p) => ({ ...p, expiryDate: e.target.value }))
+                    }
+                  />
+                  <Select
+                    label="Payment Terms"
+                    placeholder=""
+                    value={detailsDraft.paymentTerms}
+                    options={PAYMENT_TERM_OPTIONS}
+                    onChange={(e) =>
+                      setDetailsDraft((p) => ({ ...p, paymentTerms: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Draft Items Manager */}
+            {selectedSub.status === 'draft' && (
+              <div className="bg-white border border-zinc-200 rounded-xl p-4 space-y-3">
+                <div className="text-xs font-semibold text-zinc-900">
+                  Add Item to Draft Subscription
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-end text-xs">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-medium text-zinc-600 mb-1">
+                      Product
+                    </label>
+                    <select
+                      value={newItem.productId}
+                      onChange={(e) => {
+                        const pid = e.target.value;
+                        const prod = products.find((p) => p.id === pid);
+                        setNewItem((prev) => ({
+                          ...prev,
+                          productId: pid,
+                          variantId: prod?.variants?.[0]?.id || '',
+                          unitPrice: Number(prod?.salesPrice) || 0,
+                        }));
+                      }}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-300 bg-white text-xs font-medium text-zinc-900 focus:outline-none focus:border-zinc-900"
+                    >
+                      <option value="">Select product...</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({formatMoney(p.salesPrice)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-zinc-600 mb-1">
+                      Quantity
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={newItem.quantity}
+                      onChange={(e) =>
+                        setNewItem((prev) => ({
+                          ...prev,
+                          quantity: Math.max(1, Number(e.target.value) || 1),
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-300 text-xs tabular-nums text-zinc-900 focus:outline-none focus:border-zinc-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-zinc-600 mb-1">
+                      Unit Price
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newItem.unitPrice}
+                      onChange={(e) =>
+                        setNewItem((prev) => ({
+                          ...prev,
+                          unitPrice: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-300 text-xs tabular-nums text-zinc-900 focus:outline-none focus:border-zinc-900"
+                    />
+                  </div>
+                  <div>
+                    <Button
+                      type="button"
+                      variant="primary"
+                      size="sm"
+                      icon={Plus}
+                      loading={actionLoading}
+                      onClick={handleAddDraftItem}
+                      className="w-full"
+                    >
+                      Add Line
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Product Lines Table: Product | Quantity | Unit Price | Taxes | Amount */}
             <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden">

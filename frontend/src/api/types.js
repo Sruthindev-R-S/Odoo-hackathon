@@ -3,6 +3,7 @@
  */
 
 export const PRODUCT_TYPES = [
+  { value: 'standard', label: 'Standard Product' },
   { value: 'software', label: 'Software / SaaS' },
   { value: 'service', label: 'Managed Service' },
   { value: 'addon', label: 'Add-on / Module' },
@@ -17,12 +18,18 @@ export const BILLING_PERIODS = [
   { value: 'yearly', label: 'Yearly', adjectival: 'year' },
 ];
 
+export const AUTO_CLOSE_POLICIES = [
+  { value: 'end_of_term', label: 'End of Term' },
+  { value: 'immediate', label: 'Immediate on Expiry' },
+  { value: 'none', label: 'None (Manual Close)' },
+];
+
 /**
  * Default blank product schema for creation forms.
  */
 export const INITIAL_PRODUCT_STATE = {
   name: '',
-  type: 'software',
+  type: 'standard',
   salesPrice: '',
   costPrice: '',
   notes: '',
@@ -50,10 +57,10 @@ export const INITIAL_PLAN_STATE = {
   minQuantity: 1,
   availableFrom: '',
   availableTo: '',
+  autoClose: 'end_of_term',
   // 4 behavior switches
-  autoCloseOnEnd: true,     // Closes automatically when it ends
-  allowEarlyClose: true,    // Can be closed early
-  allowPause: true,         // Can be paused
-  allowRenewal: true,       // Can be renewed
+  autoCloseOnEnd: true, // Closes automatically when it ends
+  allowEarlyClose: false, // Can be closed early
+  allowPause: true, // Can be paused
+  allowRenewal: true, // Can be renewed
 };
-

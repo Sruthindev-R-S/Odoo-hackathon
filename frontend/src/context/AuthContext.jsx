@@ -13,10 +13,10 @@ export function AuthProvider({ children }) {
   });
   const [isLoading, setIsLoading] = useState(false);
 
-  const signIn = useCallback(async ({ email, password }) => {
+  const signIn = useCallback(async (credentials) => {
     setIsLoading(true);
     try {
-      const result = await authService.signIn({ email, password });
+      const result = await authService.signIn(credentials);
       if (result.success) {
         setUser(result.user);
       }
@@ -44,8 +44,8 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  const requestPasswordReset = useCallback(async (email) => {
-    return await authService.requestPasswordReset(email);
+  const requestPasswordReset = useCallback(async (email, accountType) => {
+    return await authService.requestPasswordReset(email, accountType);
   }, []);
 
   const validateResetToken = useCallback(async (token) => {

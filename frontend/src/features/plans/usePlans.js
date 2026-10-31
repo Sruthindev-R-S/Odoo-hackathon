@@ -35,9 +35,16 @@ export function usePlans() {
     return updated;
   };
 
+  const togglePlanStatus = async (id, active) => {
+    const updated = await planService.updatePlanStatus(id, active);
+    setPlans((prev) => prev.map((p) => (p.id === id ? updated : p)));
+    return updated;
+  };
+
   const removePlan = async (id) => {
     await planService.deletePlan(id);
-    setPlans((prev) => prev.filter((p) => p.id !== id));
+    const refreshed = await planService.getPlans();
+    setPlans(refreshed);
     return true;
   };
 
@@ -48,6 +55,7 @@ export function usePlans() {
     fetchPlans,
     addPlan,
     editPlan,
+    togglePlanStatus,
     removePlan,
   };
 }

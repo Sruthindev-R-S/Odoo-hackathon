@@ -85,6 +85,9 @@ export default function QuotationTemplateManagement() {
       variantExtraPrice: extra,
       quantity: Math.max(1, Number(plan?.minQuantity) || 1),
       unitPrice: basePrice + extra,
+      taxName: 'VAT',
+      taxRate: 18,
+      taxes: [{ name: 'VAT', rate: 18 }],
     };
   };
 
@@ -94,8 +97,8 @@ export default function QuotationTemplateManagement() {
     setFormData({
       name: '',
       planId: firstPlan?.id || '',
-      validityDays: 15,
-      paymentTerms: 'Net 15',
+      validityDays: 30,
+      paymentTerms: 'Net 30',
       notes: '',
       lines: firstPlan ? [buildDefaultLineForPlan(firstPlan, products)] : [],
     });
@@ -108,10 +111,22 @@ export default function QuotationTemplateManagement() {
     setFormData({
       name: tmpl.name || '',
       planId: tmpl.planId || '',
-      validityDays: tmpl.validityDays || 15,
-      paymentTerms: tmpl.paymentTerms || 'Net 15',
+      validityDays: tmpl.validityDays ?? 30,
+      paymentTerms: tmpl.paymentTerms || 'Net 30',
       notes: tmpl.notes || '',
-      lines: (tmpl.lines || []).map((l) => ({ ...l })),
+      lines: (tmpl.lines || []).map((l) => {
+        const firstTax = Array.isArray(l.taxes) && l.taxes[0] ? l.taxes[0] : null;
+        return {
+          ...l,
+          taxName: l.taxName || firstTax?.name || 'VAT',
+          taxRate:
+            l.taxRate !== undefined
+              ? l.taxRate
+              : firstTax?.rate !== undefined
+              ? Number(firstTax.rate)
+              : 18,
+        };
+      }),
     });
     setErrors({});
     setDrawerOpen(true);
@@ -144,6 +159,9 @@ export default function QuotationTemplateManagement() {
           variantExtraPrice: extra,
           quantity: 1,
           unitPrice: (Number(firstProd.salesPrice) || 0) + extra,
+          taxName: 'VAT',
+          taxRate: 18,
+          taxes: [{ name: 'VAT', rate: 18 }],
         },
       ],
     }));
@@ -189,6 +207,15 @@ export default function QuotationTemplateManagement() {
         line.quantity = Math.max(1, Number(value) || 1);
       } else if (field === 'unitPrice') {
         line.unitPrice = Math.max(0, Number(value) || 0);
+      } else if (field === 'taxRate') {
+        const rate = Math.max(0, Number(value) || 0);
+        line.taxRate = rate;
+        line.taxes =
+          rate > 0 ? [{ name: line.taxName || 'VAT', rate }] : [];
+      } else if (field === 'taxName') {
+        line.taxName = value;
+        const rate = Math.max(0, Number(line.taxRate ?? 18));
+        line.taxes = rate > 0 ? [{ name: value || 'VAT', rate }] : [];
       }
 
       nextLines[index] = line;
@@ -540,7 +567,7 @@ export default function QuotationTemplateManagement() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3 items-end">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
                       <Input
                         label="Quantity"
                         type="number"
@@ -559,6 +586,17 @@ export default function QuotationTemplateManagement() {
                         value={line.unitPrice}
                         onChange={(e) =>
                           handleUpdateLine(idx, 'unitPrice', e.target.value)
+                        }
+                      />
+                      <Input
+                        label={`Tax % (${line.taxName || 'VAT'})`}
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={line.taxRate ?? 18}
+                        onChange={(e) =>
+                          handleUpdateLine(idx, 'taxRate', e.target.value)
                         }
                       />
                       <div className="flex items-center justify-between pb-1.5">

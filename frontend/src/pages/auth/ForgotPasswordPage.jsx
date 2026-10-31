@@ -6,8 +6,10 @@ import { useAuth } from '../../context/AuthContext';
 
 export function ForgotPasswordPage() {
   const { requestPasswordReset } = useAuth();
+  const [accountType, setAccountType] = useState('company');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -22,8 +24,11 @@ export function ForgotPasswordPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await requestPasswordReset(email);
+      const res = await requestPasswordReset(email, accountType);
       if (res.success) {
+        setSuccessMessage(
+          res.message || 'If the account exists, a reset link will be sent.'
+        );
         setSubmitted(true);
       } else {
         setError(res.error || 'Failed to request reset link.');
@@ -38,24 +43,35 @@ export function ForgotPasswordPage() {
   return (
     <AuthLayout
       title="Reset your password"
-      subtitle="Enter the email associated with your account to receive a secure reset link"
+      subtitle="Enter the email associated with your account to receive a reset link"
     >
       {submitted ? (
         <div style={{ textAlign: 'center' }}>
-          <div className="bl-alert bl-alert-success" style={{ textAlign: 'left', marginBottom: 20 }}>
-            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style={{ flexShrink: 0, marginTop: 2 }}>
+          <div
+            className="bl-alert bl-alert-success"
+            style={{ textAlign: 'left', marginBottom: 20 }}
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              style={{ flexShrink: 0, marginTop: 2 }}
+            >
               <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
             </svg>
             <div>
-              <strong>Reset link sent</strong>
-              <div style={{ fontSize: 13, marginTop: 4 }}>
-                If <strong>{email}</strong> is registered with Brightloop, an email containing your password reset link has been dispatched.
-              </div>
+              <strong>Reset request submitted</strong>
+              <div style={{ fontSize: 13, marginTop: 4 }}>{successMessage}</div>
             </div>
           </div>
 
           <div style={{ marginTop: 20 }}>
-            <Link to="/signin" className="bl-btn bl-btn-secondary bl-btn-lg" style={{ textDecoration: 'none' }}>
+            <Link
+              to="/signin"
+              className="bl-btn bl-btn-secondary bl-btn-lg"
+              style={{ textDecoration: 'none' }}
+            >
               Back to Sign In
             </Link>
           </div>
@@ -67,6 +83,56 @@ export function ForgotPasswordPage() {
               <div>{error}</div>
             </div>
           )}
+
+          <div style={{ marginBottom: 14 }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: 13,
+                fontWeight: 600,
+                color: 'var(--bl-text-primary)',
+                marginBottom: 6,
+              }}
+            >
+              Account Type
+            </label>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 8,
+              }}
+            >
+              {[
+                { value: 'company', label: 'Company User (Admin / Staff)' },
+                { value: 'customer', label: 'Customer Account' },
+              ].map((opt) => {
+                const selected = accountType === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setAccountType(opt.value)}
+                    style={{
+                      padding: '9px 10px',
+                      borderRadius: 8,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: selected
+                        ? '1px solid #18181b'
+                        : '1px solid #e4e4e7',
+                      backgroundColor: selected ? '#18181b' : '#ffffff',
+                      color: selected ? '#ffffff' : '#3f3f46',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <Input
             id="reset-email"

@@ -11,11 +11,13 @@ import { useToast } from '../../components/ui/ToastContext';
 import { BILLING_PERIODS } from '../../api/types';
 
 export default function PlanManagement() {
-  const { plans, loading, addPlan, editPlan, removePlan } = usePlans();
+  const { plans, loading, addPlan, editPlan, togglePlanStatus, removePlan } = usePlans();
   const { showToast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPeriod, setSelectedPeriod] = useState('all');
+  const [selectedStatus, setSelectedStatus] = useState('all');
+  const [togglingId, setTogglingId] = useState(null);
 
   // Drawer state
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -32,10 +34,32 @@ export default function PlanManagement() {
         (p.productName && p.productName.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesPeriod = selectedPeriod === 'all' || p.billingPeriod === selectedPeriod;
+      const isPlanActive = p.active !== false;
+      const matchesStatus =
+        selectedStatus === 'all' ||
+        (selectedStatus === 'active' && isPlanActive) ||
+        (selectedStatus === 'inactive' && !isPlanActive);
 
-      return matchesSearch && matchesPeriod;
+      return matchesSearch && matchesPeriod && matchesStatus;
     });
-  }, [plans, searchQuery, selectedPeriod]);
+  }, [plans, searchQuery, selectedPeriod, selectedStatus]);
+
+  const handleToggleStatus = async (plan) => {
+    if (togglingId) return;
+    const nextActive = plan.active === false;
+    setTogglingId(plan.id);
+    try {
+      await togglePlanStatus(plan.id, nextActive);
+      showToast(
+        `Plan "${plan.name}" ${nextActive ? 'activated' : 'deactivated'}`,
+        'success'
+      );
+    } catch (err) {
+      showToast(err.message || 'Failed to update plan status', 'error');
+    } finally {
+      setTogglingId(null);
+    }
+  };
 
   const handleOpenAdd = () => {
     setEditingPlan(null);
@@ -104,10 +128,19 @@ export default function PlanManagement() {
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <span className="text-xs font-semibold text-zinc-500 flex items-center gap-1 shrink-0">
-              <Filter className="w-3.5 h-3.5" /> Billing Period:
+              <Filter className="w-3.5 h-3.5" /> Filter:
             </span>
+            <select
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="text-xs bg-zinc-50 border border-zinc-300 rounded-lg px-2.5 py-2 font-medium text-zinc-900 focus:outline-none focus:ring-1 focus:ring-zinc-900"
+            >
+              <option value="all">All Statuses</option>
+              <option value="active">Active Only</option>
+              <option value="inactive">Archived / Inactive</option>
+            </select>
             <select
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value)}
@@ -143,7 +176,7 @@ export default function PlanManagement() {
       ) : filteredPlans.length === 0 ? (
         <div className="bg-white rounded-xl border border-zinc-200 p-8 text-center">
           <p className="text-sm font-medium text-zinc-600">
-            No plans match "{searchQuery}"
+            No plans match the selected filters
           </p>
           <Button
             variant="ghost"
@@ -152,6 +185,7 @@ export default function PlanManagement() {
             onClick={() => {
               setSearchQuery('');
               setSelectedPeriod('all');
+              setSelectedStatus('all');
             }}
           >
             Clear filters
@@ -161,6 +195,7 @@ export default function PlanManagement() {
         <PlanTable
           plans={filteredPlans}
           onEdit={handleOpenEdit}
+          onToggleStatus={handleToggleStatus}
           onDelete={(p) => setDeletingPlan(p)}
         />
       )}
@@ -174,11 +209,11 @@ export default function PlanManagement() {
         isEditing={Boolean(editingPlan)}
       />
 
-      {/* Delete Confirmation Modal */}
+      {/* Archive / Delete Confirmation Modal */}
       <Modal
         isOpen={Boolean(deletingPlan)}
         onClose={() => setDeletingPlan(null)}
-        title="Delete Subscription Plan"
+        title="Archive Subscription Plan"
         footer={
           <>
             <Button
@@ -193,15 +228,15 @@ export default function PlanManagement() {
               onClick={handleDeleteConfirm}
               loading={isDeleting}
             >
-              Confirm Delete
+              Confirm Archive
             </Button>
           </>
         }
       >
         <p className="text-sm text-zinc-600 leading-relaxed">
-          Are you sure you want to delete the plan{' '}
+          Are you sure you want to archive the plan{' '}
           <strong className="text-zinc-900">"{deletingPlan?.name}"</strong>?
-          This will prevent new subscriptions from using this plan template.
+          Archived plans are deactivated for new subscriptions and can be reactivated anytime.
         </p>
       </Modal>
     </div>
