@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import {
   Repeat,
   FileText,
@@ -12,6 +12,8 @@ import {
   Printer,
   CheckCircle2,
   Calendar,
+  Receipt,
+  ArrowRight,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { operationsService } from '../../api/services/operationsService';
@@ -22,11 +24,11 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
-import Badge from '../../components/ui/Badge';
 import Drawer from '../../components/ui/Drawer';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import MoneyText from '../../components/domain/MoneyText';
+import { InvoiceStatusStepper } from '../../components/domain/StatusStepper';
 import {
   SubscriptionStatusBadge,
   InvoiceStatusBadge,
@@ -41,6 +43,7 @@ import {
 export default function CustomerPortal() {
   const { user } = useAuth();
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentTab = searchParams.get('tab') || 'overview';
 
@@ -75,7 +78,6 @@ export default function CustomerPortal() {
   };
 
   const loadPortalData = useCallback(async () => {
-    if (!user) return;
     setLoading(true);
     try {
       const [subs, invs, allPlans, allProducts] = await Promise.all([
@@ -86,7 +88,10 @@ export default function CustomerPortal() {
       ]);
 
       const customerVisibleInvoices = invs.filter(
-        (i) => i.status === 'confirmed' || i.status === 'paid'
+        (i) =>
+          i.status === 'confirmed' ||
+          i.status === 'paid' ||
+          Boolean(i.sentAt)
       );
       const activeCatalogPlans = allPlans.filter(
         (p) => getPlanAvailability(p.availableFrom, p.availableTo) === 'active'
@@ -118,7 +123,7 @@ export default function CustomerPortal() {
     0
   );
 
-  // Self-service Subscribe calculations
+  // Self-service Quick Subscribe calculations
   const chosenPlan =
     availablePlans.find((p) => p.id === subForm.planId) || null;
   const chosenProduct =
@@ -156,10 +161,10 @@ export default function CustomerPortal() {
     try {
       const created = await operationsService.createSubscription(
         {
-          customerId: user.customerId || `cust_${user.id}`,
-          customerName: user.name,
-          customerEmail: user.email,
-          customerOrganization: user.organization || '',
+          customerId: user?.customerId || user?.id || undefined,
+          customerName: user?.name || 'Brightloop Customer',
+          customerEmail: user?.email || 'customer@brightloop.io',
+          customerOrganization: user?.organization || '',
           planId: chosenPlan.id,
           planName: chosenPlan.name,
           billingPeriod: chosenPlan.billingPeriod,
@@ -264,22 +269,41 @@ export default function CustomerPortal() {
   return (
     <PortalLayout currentTab={currentTab} onNavigate={handleNavigate}>
       <div className="space-y-8">
-        {/* Top Greeting Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* Top Greeting Bar with Direct Billing Page Access */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
           <div>
             <h1 className="text-2xl font-bold text-zinc-900 tracking-tight">
-              {user?.organization || user?.name || 'My Billing Portal'}
+              {user?.organization || user?.name || 'Customer Dashboard'}
             </h1>
             <p className="text-sm text-zinc-500 mt-1">
-              Manage your active subscriptions, renewal preferences, and billing statements for{' '}
-              <span className="font-medium text-zinc-700">{user?.email}</span>.
+              {user?.email ? (
+                <>
+                  Manage active subscriptions, plan checkouts, and billing statements for{' '}
+                  <span className="font-medium text-zinc-700">{user.email}</span>.
+                </>
+              ) : (
+                'Select subscription plans, review recurring billing statements, and manage renewals.'
+              )}
             </p>
           </div>
-          {availablePlans.length > 0 && (
-            <Button variant="primary" icon={Plus} onClick={openSubscribeDrawer}>
-              Subscribe to a Plan
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Button
+              variant="primary"
+              icon={Receipt}
+              onClick={() => navigate('/portal/billing')}
+            >
+              Open Billing Page
             </Button>
-          )}
+            {availablePlans.length > 0 && (
+              <Button
+                variant="secondary"
+                icon={Plus}
+                onClick={openSubscribeDrawer}
+              >
+                Quick Subscribe
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* OVERVIEW TAB */}
@@ -342,18 +366,75 @@ export default function CustomerPortal() {
                 <div className="text-xs text-zinc-400 mt-1">
                   {outstandingInvoices.length}{' '}
                   {outstandingInvoices.length === 1
-                    ? 'open invoice'
-                    : 'open invoices'}
+                    ? 'confirmed invoice due'
+                    : 'confirmed invoices due'}
                 </div>
               </Card>
             </div>
+
+            {/* Prominent Billing Page & Plan Checkout Section */}
+            <Card className="p-6 bg-white border-zinc-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-zinc-900">
+                    Billing & Plan Checkout
+                  </h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    Configure plans, product variants, and optional add-ons with instant recurring billing checkout.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={ArrowRight}
+                  onClick={() => navigate('/portal/billing')}
+                >
+                  Go to Billing Page
+                </Button>
+              </div>
+
+              {availablePlans.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  {availablePlans.slice(0, 3).map((plan) => (
+                    <div
+                      key={plan.id}
+                      className="p-4 rounded-xl border border-zinc-200 bg-zinc-50/60 flex flex-col justify-between gap-3"
+                    >
+                      <div>
+                        <div className="text-sm font-bold text-zinc-900">
+                          {plan.name}
+                        </div>
+                        <div className="text-xs text-zinc-500 mt-0.5 line-clamp-1">
+                          {plan.productName || 'Recurring Subscription'}
+                        </div>
+                        <div className="mt-2.5 flex items-baseline gap-1">
+                          <span className="text-base font-bold text-zinc-900 tabular-nums">
+                            {formatMoney(plan.price)}
+                          </span>
+                          <span className="text-xs text-zinc-500 capitalize">
+                            / {plan.billingPeriod}
+                          </span>
+                        </div>
+                      </div>
+                      <Link
+                        to={`/portal/billing?planId=${encodeURIComponent(plan.id)}`}
+                        className="inline-flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-lg text-xs font-semibold bg-zinc-900 text-white hover:bg-zinc-800 no-underline transition-colors"
+                      >
+                        Select on Billing Page
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
 
             {/* Outstanding Invoices Prompt (if any) */}
             {outstandingInvoices.length > 0 && (
               <Card className="p-5 bg-white border-zinc-200">
                 <div className="flex items-center justify-between mb-3">
                   <h2 className="text-sm font-bold text-zinc-900">
-                    Open Invoices Awaiting Payment
+                    Confirmed Invoices Awaiting Payment
                   </h2>
                   <Button
                     variant="ghost"
@@ -426,16 +507,14 @@ export default function CustomerPortal() {
                   <p className="text-sm text-zinc-500 mb-4">
                     You do not have any subscriptions under this account yet.
                   </p>
-                  {availablePlans.length > 0 && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      icon={Plus}
-                      onClick={openSubscribeDrawer}
-                    >
-                      Browse Available Plans
-                    </Button>
-                  )}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    icon={Receipt}
+                    onClick={() => navigate('/portal/billing')}
+                  >
+                    Choose a Plan on Billing Page
+                  </Button>
                 </div>
               ) : (
                 <div className="divide-y divide-zinc-200">
@@ -466,7 +545,7 @@ export default function CustomerPortal() {
                       <div className="text-right">
                         <MoneyText amount={sub.recurringAmount} />
                         <div className="text-[11px] text-zinc-400 capitalize">
-                          per {sub.billingPeriod}
+                          per {sub.billingPeriod} (excl. tax)
                         </div>
                       </div>
                     </div>
@@ -488,18 +567,10 @@ export default function CustomerPortal() {
               <EmptyState
                 icon={Repeat}
                 title="No subscriptions on your account"
-                description={
-                  availablePlans.length > 0
-                    ? 'Choose an active subscription plan to get started.'
-                    : 'Your subscriptions and quotations sent by our team will appear here.'
-                }
-                actionLabel={
-                  availablePlans.length > 0 ? 'Subscribe to a Plan' : undefined
-                }
-                actionIcon={Plus}
-                onAction={
-                  availablePlans.length > 0 ? openSubscribeDrawer : undefined
-                }
+                description="Visit the Billing Page to select a plan, configure variants and add-ons, and activate recurring billing."
+                actionLabel="Open Billing Page"
+                actionIcon={Receipt}
+                onAction={() => navigate('/portal/billing')}
               />
             ) : (
               subscriptions.map((sub) => {
@@ -690,7 +761,10 @@ export default function CustomerPortal() {
               <EmptyState
                 icon={FileText}
                 title="No invoices on your account"
-                description="Confirmed billing statements and payment receipts for your subscriptions will appear here."
+                description="Confirmed billing statements and checkout payment receipts for your subscriptions will appear here."
+                actionLabel="Go to Billing Page"
+                actionIcon={Receipt}
+                onAction={() => navigate('/portal/billing')}
               />
             ) : (
               <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
@@ -703,6 +777,7 @@ export default function CustomerPortal() {
                         <th className="py-3 px-4">Date</th>
                         <th className="py-3 px-4">Due Date</th>
                         <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Tax</th>
                         <th className="py-3 px-4 text-right">Total</th>
                         <th className="py-3 px-4 text-right">Due</th>
                         <th className="py-3 px-4 text-right">Actions</th>
@@ -729,6 +804,9 @@ export default function CustomerPortal() {
                               dueDate={inv.dueDate}
                               amountDue={inv.amountDue}
                             />
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-xs text-zinc-600 tabular-nums">
+                            {formatMoney(inv.taxAmount || 0)}
                           </td>
                           <td className="py-3.5 px-4 text-right">
                             <MoneyText amount={inv.total} />
@@ -769,20 +847,27 @@ export default function CustomerPortal() {
         )}
       </div>
 
-      {/* Subscribe Drawer */}
+      {/* Quick Subscribe Drawer */}
       <Drawer
         isOpen={subscribeOpen}
         onClose={() => setSubscribeOpen(false)}
-        title="Subscribe to a Plan"
-        subtitle="Select an available plan and optional product variant."
+        title="Quick Subscribe"
+        subtitle="Start an active subscription now (invoices generated on Billing Day), or use the full Billing Page for instant checkout."
         footer={
           <>
             <Button
               variant="outline"
-              onClick={() => setSubscribeOpen(false)}
+              onClick={() => {
+                setSubscribeOpen(false);
+                navigate(
+                  chosenPlan
+                    ? `/portal/billing?planId=${encodeURIComponent(chosenPlan.id)}`
+                    : '/portal/billing'
+                );
+              }}
               disabled={submittingSub}
             >
-              Cancel
+              Full Billing Checkout
             </Button>
             <Button
               variant="primary"
@@ -868,7 +953,7 @@ export default function CustomerPortal() {
                 </div>
               )}
               <div className="border-t border-zinc-200 pt-2 flex justify-between text-sm font-bold text-zinc-900">
-                <span>Recurring Total</span>
+                <span>Recurring Subtotal</span>
                 <span className="tabular-nums">
                   {formatMoney(totalRecurring)} / {chosenPlan.billingPeriod}
                 </span>
@@ -959,6 +1044,7 @@ export default function CustomerPortal() {
             />
             <Select
               label="Payment Method"
+              placeholder=""
               value={payForm.method}
               options={[
                 { value: 'UPI', label: 'UPI' },
@@ -1004,6 +1090,10 @@ export default function CustomerPortal() {
       >
         {viewingInvoice && (
           <div className="space-y-5">
+            <div className="print:hidden">
+              <InvoiceStatusStepper currentStatus={viewingInvoice.status} />
+            </div>
+
             <div className="flex items-center justify-between">
               <div className="text-xs text-zinc-500">
                 Issued {formatDate(viewingInvoice.invoiceDate)} · Due{' '}
@@ -1029,7 +1119,7 @@ export default function CustomerPortal() {
                   {(viewingInvoice.lines || []).map((l) => (
                     <tr key={l.id}>
                       <td className="py-3 px-3 font-medium text-zinc-900">
-                        {l.description}
+                        {l.description || l.name}
                       </td>
                       <td className="py-3 px-3 text-right tabular-nums text-zinc-600">
                         {l.quantity}
@@ -1043,7 +1133,21 @@ export default function CustomerPortal() {
               </table>
               <div className="bg-zinc-50 border-t border-zinc-200 p-3.5 space-y-1.5">
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Total</span>
+                  <span className="text-zinc-500">Subtotal</span>
+                  <span className="font-medium text-zinc-900 tabular-nums">
+                    {formatMoney(viewingInvoice.subtotal)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">
+                    Tax ({viewingInvoice.taxRate || '0%'})
+                  </span>
+                  <span className="font-medium text-zinc-900 tabular-nums">
+                    {formatMoney(viewingInvoice.taxAmount || 0)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-zinc-200 pt-1.5">
+                  <span className="text-zinc-700 font-semibold">Total</span>
                   <span className="font-semibold text-zinc-900 tabular-nums">
                     {formatMoney(viewingInvoice.total)}
                   </span>

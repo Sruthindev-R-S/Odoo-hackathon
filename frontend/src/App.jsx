@@ -275,6 +275,22 @@ export default function App() {
                 </RequireAdmin>
               }
             />
+            <Route
+              path="/taxes"
+              element={
+                <RequireAdmin>
+                  <AdminWorkspace initialTab="taxes" />
+                </RequireAdmin>
+              }
+            />
+            <Route
+              path="/settings/taxes"
+              element={
+                <RequireAdmin>
+                  <AdminWorkspace initialTab="taxes" />
+                </RequireAdmin>
+              }
+            />
 
             {/* Customer Plan Selection & Recurring Billing Checkout */}
             <Route path="/billing" element={<CustomerBillingPage />} />
@@ -286,7 +302,7 @@ export default function App() {
             <Route
               path="/staff"
               element={
-                <RequireRole allowedRoles={['staff', 'admin']}>
+                <RequireRole allowedRoles={['staff', 'admin']} allowUnauthenticated>
                   <StaffWorkspace initialTab="dashboard" />
                 </RequireRole>
               }
@@ -296,7 +312,7 @@ export default function App() {
             <Route
               path="/portal"
               element={
-                <RequireRole allowedRoles={['customer']}>
+                <RequireRole allowedRoles={['customer']} allowUnauthenticated>
                   <CustomerPortal />
                 </RequireRole>
               }

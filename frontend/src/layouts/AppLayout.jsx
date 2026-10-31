@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Package,
   CalendarDays,
+  Percent,
   Receipt,
   Repeat,
   FileText,
@@ -37,6 +38,12 @@ const ADMIN_NAV_ITEMS = [
     group: 'Catalog & System',
   },
   {
+    id: 'taxes',
+    label: 'Tax Rules',
+    icon: Percent,
+    group: 'Catalog & System',
+  },
+  {
     id: 'billing',
     label: 'Customer Billing',
     icon: Receipt,
@@ -50,7 +57,7 @@ const ADMIN_NAV_ITEMS = [
   },
   {
     id: 'invoices',
-    label: 'Invoices & Billing',
+    label: 'Billing Day & Invoices',
     icon: FileText,
     group: 'Operations',
   },
@@ -77,7 +84,7 @@ const STAFF_NAV_ITEMS = [
   },
   {
     id: 'invoices',
-    label: 'Invoices & Billing',
+    label: 'Billing Day & Invoices',
     icon: FileText,
     group: 'Daily Operations',
   },

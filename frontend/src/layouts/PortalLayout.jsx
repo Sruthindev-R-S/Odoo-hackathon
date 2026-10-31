@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, Receipt } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const PORTAL_TABS = [
@@ -20,7 +20,7 @@ export default function PortalLayout({ currentTab, onNavigate, children }) {
   return (
     <div className="min-h-screen bg-[#fafafa] flex flex-col font-sans text-zinc-900">
       {/* Clean Top Bar */}
-      <header className="bg-white border-b border-zinc-200 sticky top-0 z-30">
+      <header className="bg-white border-b border-zinc-200 sticky top-0 z-30 print:hidden">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2.5">
@@ -32,7 +32,7 @@ export default function PortalLayout({ currentTab, onNavigate, children }) {
                   Brightloop
                 </span>
                 <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-[11px] font-medium rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200">
-                  Customer Portal
+                  Customer Dashboard
                 </span>
               </div>
             </div>
@@ -56,33 +56,53 @@ export default function PortalLayout({ currentTab, onNavigate, children }) {
                   </button>
                 );
               })}
+              <Link
+                to="/portal/billing"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 no-underline transition-colors"
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                Billing Page
+              </Link>
             </nav>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <Link
-              to="/billing"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 bg-white no-underline transition-colors"
+              to="/portal/billing"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-zinc-900 hover:bg-zinc-800 no-underline transition-colors"
             >
-              Plan Checkout
+              <Receipt className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Billing & Checkout</span>
+              <span className="sm:hidden">Billing</span>
             </Link>
-            <Link
-              to="/account"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 bg-white no-underline transition-colors"
-            >
-              <User className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline max-w-36 truncate">
-                {user?.organization || user?.name || 'Account'}
-              </span>
-            </Link>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 bg-white transition-colors"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </button>
+            {user ? (
+              <>
+                <Link
+                  to="/account"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 bg-white no-underline transition-colors"
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline max-w-36 truncate">
+                    {user.organization || user.name || 'Account'}
+                  </span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 bg-white transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              </>
+            ) : (
+              <Link
+                to="/signin"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-700 hover:text-zinc-900 hover:bg-zinc-100 border border-zinc-200 bg-white no-underline transition-colors"
+              >
+                Sign In
+              </Link>
+            )}
           </div>
         </div>
 
@@ -105,6 +125,13 @@ export default function PortalLayout({ currentTab, onNavigate, children }) {
               </button>
             );
           })}
+          <Link
+            to="/portal/billing"
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap text-zinc-700 hover:bg-zinc-100 no-underline"
+          >
+            <Receipt className="w-3.5 h-3.5" />
+            Billing Page
+          </Link>
         </div>
       </header>
 

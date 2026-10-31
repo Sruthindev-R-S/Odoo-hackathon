@@ -10,7 +10,7 @@ const SUBSCRIPTION_MAP = {
 
 const INVOICE_MAP = {
   draft: { label: 'Draft', variant: 'neutral', dot: 'bg-zinc-400' },
-  confirmed: { label: 'Outstanding', variant: 'warning', dot: 'bg-amber-600' },
+  confirmed: { label: 'Confirmed', variant: 'warning', dot: 'bg-amber-600' },
   paid: { label: 'Paid', variant: 'success', dot: 'bg-emerald-600' },
   cancelled: { label: 'Cancelled', variant: 'neutral', dot: 'bg-zinc-300' },
 };

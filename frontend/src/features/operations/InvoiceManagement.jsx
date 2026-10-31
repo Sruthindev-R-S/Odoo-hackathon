@@ -7,36 +7,46 @@ import {
   Printer,
   CheckCircle2,
   XCircle,
+  Send,
+  SlidersHorizontal,
+  MailCheck,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { operationsService } from '../../api/services/operationsService';
+import { taxService } from '../../api/services/taxService';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
+import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
 import Drawer from '../../components/ui/Drawer';
 import EmptyState from '../../components/ui/EmptyState';
 import MoneyText from '../../components/domain/MoneyText';
+import { InvoiceStatusStepper } from '../../components/domain/StatusStepper';
 import { InvoiceStatusBadge } from '../../components/domain/SubscriptionStatusBadge';
 import { useToast } from '../../components/ui/useToast';
 import { formatDate, formatMoney } from '../../lib/format';
 
-export default function InvoiceManagement() {
+export default function InvoiceManagement({ onConfigureTaxes }) {
   const { user } = useAuth();
   const { showToast } = useToast();
 
   const [invoices, setInvoices] = useState([]);
   const [billingRuns, setBillingRuns] = useState([]);
+  const [taxRules, setTaxRules] = useState([]);
+  const [eligibleSubsCount, setEligibleSubsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   const [confirmBillingOpen, setConfirmBillingOpen] = useState(false);
   const [runningBilling, setRunningBilling] = useState(false);
+  const [confirmingBatch, setConfirmingBatch] = useState(false);
 
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [paymentModalInv, setPaymentModalInv] = useState(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [actionBusyId, setActionBusyId] = useState(null);
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     method: 'Bank Transfer',
@@ -47,12 +57,18 @@ export default function InvoiceManagement() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [invList, runList] = await Promise.all([
+      const [invList, runList, rulesList, subsList] = await Promise.all([
         operationsService.getInvoices(user),
         operationsService.getBillingRuns(),
+        taxService.getTaxRules(),
+        operationsService.getSubscriptions(user),
       ]);
       setInvoices(invList);
       setBillingRuns(runList);
+      setTaxRules(rulesList);
+      setEligibleSubsCount(
+        subsList.filter((s) => s.status === 'active' && !s.isPaused).length
+      );
     } finally {
       setLoading(false);
     }
@@ -70,16 +86,19 @@ export default function InvoiceManagement() {
     inv.dueDate &&
     inv.dueDate < today;
 
+  const draftCount = invoices.filter((i) => i.status === 'draft').length;
+  const activeTaxRules = taxRules.filter((r) => r.isActive !== false);
+
   const tabs = [
     { id: 'all', label: 'All', count: invoices.length },
     {
       id: 'draft',
       label: 'Draft',
-      count: invoices.filter((i) => i.status === 'draft').length,
+      count: draftCount,
     },
     {
-      id: 'outstanding',
-      label: 'Outstanding',
+      id: 'confirmed',
+      label: 'Confirmed',
       count: invoices.filter((i) => i.status === 'confirmed' && i.amountDue > 0)
         .length,
     },
@@ -93,23 +112,30 @@ export default function InvoiceManagement() {
       label: 'Overdue',
       count: invoices.filter(isInvOverdue).length,
     },
+    {
+      id: 'cancelled',
+      label: 'Cancelled',
+      count: invoices.filter((i) => i.status === 'cancelled').length,
+    },
   ];
 
   const filteredInvoices = invoices.filter((inv) => {
     if (tab === 'draft' && inv.status !== 'draft') return false;
     if (
-      tab === 'outstanding' &&
+      tab === 'confirmed' &&
       !(inv.status === 'confirmed' && inv.amountDue > 0)
     )
       return false;
     if (tab === 'paid' && inv.status !== 'paid') return false;
     if (tab === 'overdue' && !isInvOverdue(inv)) return false;
+    if (tab === 'cancelled' && inv.status !== 'cancelled') return false;
 
     const q = searchQuery.trim().toLowerCase();
     if (!q) return true;
     return (
       inv.invoiceNumber?.toLowerCase().includes(q) ||
       inv.customerName?.toLowerCase().includes(q) ||
+      inv.customerEmail?.toLowerCase().includes(q) ||
       inv.subscriptionNumber?.toLowerCase().includes(q) ||
       inv.planName?.toLowerCase().includes(q)
     );
@@ -121,7 +147,11 @@ export default function InvoiceManagement() {
       const summary = await operationsService.runBilling(user);
       setConfirmBillingOpen(false);
       showToast(
-        `Billing run finished: Created ${summary.createdCount} · Skipped ${summary.skippedCount} (already billed).`,
+        `Billing Day complete: Created ${summary.createdCount} Draft invoice${
+          summary.createdCount === 1 ? '' : 's'
+        } · Skipped ${summary.skippedCount} (already billed)${
+          summary.pausedCount > 0 ? ` · ${summary.pausedCount} paused` : ''
+        }.`,
         'success'
       );
       await loadData();
@@ -132,23 +162,74 @@ export default function InvoiceManagement() {
     }
   };
 
+  const handleConfirmAllDrafts = async () => {
+    setConfirmingBatch(true);
+    try {
+      const { confirmedCount } = await operationsService.confirmAllDraftInvoices();
+      showToast(
+        `Confirmed ${confirmedCount} Draft invoice${
+          confirmedCount === 1 ? '' : 's'
+        }.`,
+        'success'
+      );
+      await loadData();
+    } catch (err) {
+      showToast(err.message || 'Could not confirm draft invoices.', 'error');
+    } finally {
+      setConfirmingBatch(false);
+    }
+  };
+
   const handleStatusChange = async (inv, nextStatus) => {
+    setActionBusyId(inv.id);
     try {
       const updated = await operationsService.updateInvoiceStatus(
         inv.id,
         nextStatus
       );
-      setSelectedInvoice(updated);
+      if (selectedInvoice?.id === inv.id) {
+        setSelectedInvoice(updated);
+      }
       showToast(
         `Invoice ${updated.invoiceNumber} ${
-          nextStatus === 'confirmed' ? 'confirmed' : 'cancelled'
+          nextStatus === 'confirmed'
+            ? 'moved from Draft to Confirmed'
+            : 'cancelled'
         }.`,
         'success'
       );
       await loadData();
     } catch (err) {
       showToast(err.message || 'Could not update invoice.', 'error');
+    } finally {
+      setActionBusyId(null);
     }
+  };
+
+  const handleSendInvoice = async (inv) => {
+    setActionBusyId(inv.id);
+    try {
+      const updated = await operationsService.sendInvoice(inv.id, user);
+      if (selectedInvoice?.id === inv.id) {
+        setSelectedInvoice(updated);
+      }
+      showToast(
+        `Invoice ${updated.invoiceNumber} sent to ${updated.sentTo}.`,
+        'success'
+      );
+      await loadData();
+    } catch (err) {
+      showToast(err.message || 'Could not send invoice.', 'error');
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handlePrintInvoice = (inv) => {
+    setSelectedInvoice(inv);
+    setTimeout(() => {
+      window.print();
+    }, 120);
   };
 
   const openPaymentModal = (inv) => {
@@ -173,7 +254,9 @@ export default function InvoiceManagement() {
         user
       );
       showToast(
-        `Payment recorded on ${updated.invoiceNumber} (${updated.status}).`,
+        `Payment recorded — ${updated.invoiceNumber} is now ${
+          updated.status === 'paid' ? 'Paid' : 'partially settled'
+        }.`,
         'success'
       );
       setPaymentModalInv(null);
@@ -191,47 +274,100 @@ export default function InvoiceManagement() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:hidden">
         <div>
           <h1 className="text-2xl font-bold text-zinc-900 tracking-tight">
-            Invoices & Payments
+            Billing Day & Invoices
           </h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Run recurring billing cycles without duplicates, confirm invoices, and reconcile incoming payments.
+            Generate cycle invoices automatically from subscriptions with pre-filled lines and taxes, then move each from Draft to Confirmed to Paid.
           </p>
         </div>
-        <Button
-          variant="primary"
-          icon={PlayCircle}
-          onClick={() => setConfirmBillingOpen(true)}
-        >
-          Run Billing
-        </Button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {draftCount > 0 && (
+            <Button
+              variant="secondary"
+              icon={CheckCircle2}
+              loading={confirmingBatch}
+              onClick={handleConfirmAllDrafts}
+            >
+              Confirm All Drafts ({draftCount})
+            </Button>
+          )}
+          <Button
+            variant="primary"
+            icon={PlayCircle}
+            onClick={() => setConfirmBillingOpen(true)}
+          >
+            Run Billing Day
+          </Button>
+        </div>
+      </div>
+
+      {/* Automatic Tax Rules & Duplicate Guard Status Bar */}
+      <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs print:hidden">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 font-semibold text-zinc-900">
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Admin Tax Rules:
+          </span>
+          {activeTaxRules.length === 0 ? (
+            <span className="text-zinc-500">0% (No active tax rules)</span>
+          ) : (
+            activeTaxRules.map((rule) => (
+              <Badge key={rule.id} variant="neutral" size="sm">
+                {rule.name} · {rule.rate}%
+              </Badge>
+            ))
+          )}
+          <span className="text-zinc-400">·</span>
+          <span className="text-zinc-600">
+            Active due subscriptions: <strong className="text-zinc-900">{eligibleSubsCount}</strong>
+          </span>
+        </div>
+
+        {onConfigureTaxes && (
+          <button
+            type="button"
+            onClick={onConfigureTaxes}
+            className="text-xs font-semibold text-zinc-900 hover:underline underline-offset-4 bg-transparent border-0 p-0 cursor-pointer self-start sm:self-auto"
+          >
+            Manage Tax Rules →
+          </button>
+        )}
       </div>
 
       {/* Latest Billing Run Summary (if run at least once) */}
       {billingRuns.length > 0 && (
-        <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+        <div className="bg-white border border-zinc-200 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs print:hidden">
           <div className="text-zinc-600">
-            Last billing run by{' '}
+            Latest Billing Day run by{' '}
             <strong className="text-zinc-900">{billingRuns[0].actor}</strong> on{' '}
             {formatDate(billingRuns[0].timestamp)}
           </div>
-          <div className="flex items-center gap-3 font-medium">
+          <div className="flex items-center gap-3 font-medium flex-wrap">
             <span className="text-zinc-900">
-              Created: <strong>{billingRuns[0].createdCount}</strong>
+              Created (Draft): <strong>{billingRuns[0].createdCount}</strong>
             </span>
             <span className="text-zinc-400">·</span>
             <span className="text-zinc-600">
               Skipped (already billed):{' '}
               <strong>{billingRuns[0].skippedCount}</strong>
             </span>
+            {billingRuns[0].pausedCount > 0 && (
+              <>
+                <span className="text-zinc-400">·</span>
+                <span className="text-zinc-500">
+                  Paused skipped: <strong>{billingRuns[0].pausedCount}</strong>
+                </span>
+              </>
+            )}
           </div>
         </div>
       )}
 
       {/* Filter Bar */}
-      <div className="bg-white p-3.5 rounded-xl border border-zinc-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      <div className="bg-white p-3.5 rounded-xl border border-zinc-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0">
           {tabs.map((t) => {
             const active = tab === t.id;
@@ -265,144 +401,199 @@ export default function InvoiceManagement() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search invoice #, customer..."
+            placeholder="Search invoice #, customer, plan..."
             className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border border-zinc-300 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-900/15 focus:border-zinc-900"
           />
         </div>
       </div>
 
       {/* Table / Empty */}
-      {loading ? (
-        <div className="bg-white rounded-xl border border-zinc-200 p-12 text-center text-sm text-zinc-500">
-          Loading invoices...
-        </div>
-      ) : invoices.length === 0 ? (
-        <EmptyState
-          icon={FileText}
-          title="No invoices generated yet"
-          description="Run billing to create invoices for all active subscriptions due in the current cycle."
-          actionLabel="Run Billing"
-          actionIcon={PlayCircle}
-          onAction={() => setConfirmBillingOpen(true)}
-        />
-      ) : filteredInvoices.length === 0 ? (
-        <div className="bg-white rounded-xl border border-zinc-200 p-8 text-center">
-          <p className="text-sm font-medium text-zinc-600">
-            No invoices match the selected filter.
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2 text-zinc-900 underline underline-offset-4"
-            onClick={() => {
-              setTab('all');
-              setSearchQuery('');
-            }}
-          >
-            Reset filters
-          </Button>
-        </div>
-      ) : (
-        <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-zinc-200 bg-zinc-50/80 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                  <th className="py-3 px-4">Invoice</th>
-                  <th className="py-3 px-4">Customer</th>
-                  <th className="py-3 px-4">Subscription</th>
-                  <th className="py-3 px-4">Due Date</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Total</th>
-                  <th className="py-3 px-4 text-right">Amount Due</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-200 text-sm">
-                {filteredInvoices.map((inv) => (
-                  <tr
-                    key={inv.id}
-                    className="hover:bg-zinc-50/70 transition-colors"
-                  >
-                    <td
-                      onClick={() => setSelectedInvoice(inv)}
-                      className="py-3.5 px-4 font-mono text-xs font-semibold text-zinc-900 cursor-pointer underline-offset-2 hover:underline"
-                    >
-                      {inv.invoiceNumber}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-zinc-900">
-                        {inv.customerName}
-                      </div>
-                      <div className="text-xs text-zinc-500">
-                        {inv.customerEmail}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-xs text-zinc-600">
-                      <span className="font-mono font-medium text-zinc-800">
-                        {inv.subscriptionNumber}
-                      </span>{' '}
-                      · {inv.planName}
-                    </td>
-                    <td className="py-3.5 px-4 text-xs text-zinc-600 tabular-nums">
-                      {formatDate(inv.dueDate)}
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <InvoiceStatusBadge
-                        status={inv.status}
-                        dueDate={inv.dueDate}
-                        amountDue={inv.amountDue}
-                      />
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <MoneyText amount={inv.total} />
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <MoneyText amount={inv.amountDue} />
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="inline-flex items-center justify-end gap-1.5">
-                        {inv.status === 'draft' && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => handleStatusChange(inv, 'confirmed')}
-                          >
-                            Confirm
-                          </Button>
-                        )}
-                        {inv.status === 'confirmed' && inv.amountDue > 0 && (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            icon={CreditCard}
-                            onClick={() => openPaymentModal(inv)}
-                          >
-                            Record Payment
-                          </Button>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedInvoice(inv)}
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="print:hidden">
+        {loading ? (
+          <div className="bg-white rounded-xl border border-zinc-200 p-12 text-center text-sm text-zinc-500">
+            Loading invoices...
           </div>
-        </div>
-      )}
+        ) : invoices.length === 0 ? (
+          <EmptyState
+            icon={FileText}
+            title="No invoices generated yet"
+            description="Run Billing Day to automatically create Draft invoices from all active subscriptions with customer details, product lines, taxes, and totals pre-filled."
+            actionLabel="Run Billing Day"
+            actionIcon={PlayCircle}
+            onAction={() => setConfirmBillingOpen(true)}
+          />
+        ) : filteredInvoices.length === 0 ? (
+          <div className="bg-white rounded-xl border border-zinc-200 p-8 text-center">
+            <p className="text-sm font-medium text-zinc-600">
+              No invoices match the selected filter.
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-2 text-zinc-900 underline underline-offset-4"
+              onClick={() => {
+                setTab('all');
+                setSearchQuery('');
+              }}
+            >
+              Reset filters
+            </Button>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-zinc-200 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-200 bg-zinc-50/80 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                    <th className="py-3 px-4">Invoice</th>
+                    <th className="py-3 px-4">Customer</th>
+                    <th className="py-3 px-4">Subscription</th>
+                    <th className="py-3 px-4">Due Date</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Tax</th>
+                    <th className="py-3 px-4 text-right">Total</th>
+                    <th className="py-3 px-4 text-right">Due</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-200 text-sm">
+                  {filteredInvoices.map((inv) => {
+                    const busy = actionBusyId === inv.id;
+                    return (
+                      <tr
+                        key={inv.id}
+                        className="hover:bg-zinc-50/70 transition-colors"
+                      >
+                        <td
+                          onClick={() => setSelectedInvoice(inv)}
+                          className="py-3.5 px-4 font-mono text-xs font-semibold text-zinc-900 cursor-pointer underline-offset-2 hover:underline"
+                        >
+                          <div>{inv.invoiceNumber}</div>
+                          {inv.sentAt && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-sans font-medium text-zinc-500 mt-0.5">
+                              <MailCheck className="w-3 h-3 text-zinc-700" />
+                              Sent
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-zinc-900">
+                            {inv.customerName}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {inv.customerEmail}
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-zinc-600">
+                          <span className="font-mono font-medium text-zinc-800">
+                            {inv.subscriptionNumber}
+                          </span>{' '}
+                          · {inv.planName}
+                        </td>
+                        <td className="py-3.5 px-4 text-xs text-zinc-600 tabular-nums">
+                          {formatDate(inv.dueDate)}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <InvoiceStatusBadge
+                            status={inv.status}
+                            dueDate={inv.dueDate}
+                            amountDue={inv.amountDue}
+                          />
+                        </td>
+                        <td className="py-3.5 px-4 text-right text-xs text-zinc-600 tabular-nums">
+                          {formatMoney(inv.taxAmount || 0)}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <MoneyText amount={inv.total} />
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <MoneyText amount={inv.amountDue} />
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="inline-flex items-center justify-end gap-1.5 flex-wrap">
+                            {inv.status === 'draft' && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() =>
+                                  handleStatusChange(inv, 'confirmed')
+                                }
+                              >
+                                Confirm
+                              </Button>
+                            )}
+                            {inv.status === 'confirmed' && inv.amountDue > 0 && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                icon={CreditCard}
+                                disabled={busy}
+                                onClick={() => openPaymentModal(inv)}
+                              >
+                                Pay
+                              </Button>
+                            )}
+                            {inv.status !== 'cancelled' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                icon={Send}
+                                disabled={busy}
+                                onClick={() => handleSendInvoice(inv)}
+                                title="Send invoice to customer"
+                              >
+                                Send
+                              </Button>
+                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              icon={Printer}
+                              onClick={() => handlePrintInvoice(inv)}
+                              title="Print invoice"
+                            >
+                              Print
+                            </Button>
+                            {(inv.status === 'draft' ||
+                              (inv.status === 'confirmed' &&
+                                inv.amountPaid === 0)) && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() =>
+                                  handleStatusChange(inv, 'cancelled')
+                                }
+                                title="Cancel unpaid invoice"
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedInvoice(inv)}
+                            >
+                              Details
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
 
-      {/* Run Billing Confirmation Modal */}
+      {/* Run Billing Day Confirmation Modal */}
       <Modal
         isOpen={confirmBillingOpen}
         onClose={() => setConfirmBillingOpen(false)}
-        title="Run Recurring Billing"
+        title="Run Billing Day"
         footer={
           <>
             <Button
@@ -417,17 +608,41 @@ export default function InvoiceManagement() {
               loading={runningBilling}
               onClick={handleRunBilling}
             >
-              Run Billing Now
+              Generate Cycle Invoices
             </Button>
           </>
         }
       >
-        <p className="text-sm text-zinc-600 leading-relaxed">
-          Create invoices for all active, unpaused subscriptions due in the current billing cycle? Any subscription already billed for its active cycle will be automatically skipped to prevent duplicate charges.
-        </p>
+        <div className="space-y-3 text-sm text-zinc-600 leading-relaxed">
+          <p>
+            Automatically create <strong>Draft</strong> invoices for all active, unpaused subscriptions due in the current cycle?
+          </p>
+          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-xs space-y-1.5">
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Eligible Active Subscriptions</span>
+              <span className="font-semibold text-zinc-900 tabular-nums">
+                {eligibleSubsCount}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Automatic Tax Rules Applied</span>
+              <span className="font-semibold text-zinc-900">
+                {activeTaxRules.length > 0
+                  ? activeTaxRules.map((r) => `${r.name} (${r.rate}%)`).join(', ')
+                  : '0% (No active tax rules)'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-500">Duplicate & Skip Guard</span>
+              <span className="font-semibold text-zinc-900">
+                Cycle-key deduplication active
+              </span>
+            </div>
+          </div>
+        </div>
       </Modal>
 
-      {/* Record Payment Modal */}
+      {/* Record Payment Modal (Confirmed -> Paid) */}
       <Modal
         isOpen={Boolean(paymentModalInv)}
         onClose={() => setPaymentModalInv(null)}
@@ -450,7 +665,7 @@ export default function InvoiceManagement() {
               loading={paymentLoading}
               onClick={handleRecordPayment}
             >
-              Save Payment
+              Confirm Payment
             </Button>
           </>
         }
@@ -482,6 +697,7 @@ export default function InvoiceManagement() {
               />
               <Select
                 label="Payment Method"
+                placeholder=""
                 value={paymentForm.method}
                 options={[
                   { value: 'Bank Transfer', label: 'Bank Transfer / NEFT' },
@@ -517,7 +733,7 @@ export default function InvoiceManagement() {
         )}
       </Modal>
 
-      {/* Invoice Detail Drawer */}
+      {/* Invoice Detail & Print Drawer */}
       <Drawer
         isOpen={Boolean(selectedInvoice)}
         onClose={() => setSelectedInvoice(null)}
@@ -533,15 +749,28 @@ export default function InvoiceManagement() {
         }
         footer={
           selectedInvoice && (
-            <div className="w-full flex items-center justify-between gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                icon={Printer}
-                onClick={() => window.print()}
-              >
-                Print / PDF
-              </Button>
+            <div className="w-full flex flex-wrap items-center justify-between gap-2 print:hidden">
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  icon={Printer}
+                  onClick={() => window.print()}
+                >
+                  Print
+                </Button>
+                {selectedInvoice.status !== 'cancelled' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={Send}
+                    onClick={() => handleSendInvoice(selectedInvoice)}
+                  >
+                    {selectedInvoice.sentAt ? 'Resend' : 'Send'}
+                  </Button>
+                )}
+              </div>
+
               <div className="flex items-center gap-2">
                 {selectedInvoice.status === 'draft' && (
                   <>
@@ -598,16 +827,47 @@ export default function InvoiceManagement() {
         }
       >
         {selectedInvoice && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
+          <div className="space-y-5">
+            {/* Lifecycle Stepper: Draft -> Confirmed -> Paid */}
+            <div className="print:hidden">
+              <InvoiceStatusStepper currentStatus={selectedInvoice.status} />
+            </div>
+
+            {/* Sent Notification Strip */}
+            {selectedInvoice.sentAt && (
+              <div className="bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 flex items-center justify-between text-xs text-zinc-700 print:hidden">
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <MailCheck className="w-3.5 h-3.5 text-zinc-900" />
+                  Sent to <strong>{selectedInvoice.sentTo}</strong>
+                </span>
+                <span className="text-zinc-500">
+                  {formatDate(selectedInvoice.sentAt)}
+                </span>
+              </div>
+            )}
+
+            {/* Customer & Status */}
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-xs text-zinc-500">Billed To</div>
-                <div className="text-sm font-bold text-zinc-900">
+                <div className="text-[11px] uppercase tracking-wider font-semibold text-zinc-400">
+                  Billed To
+                </div>
+                <div className="text-sm font-bold text-zinc-900 mt-0.5">
                   {selectedInvoice.customerName}
                 </div>
+                {selectedInvoice.customerOrganization && (
+                  <div className="text-xs font-medium text-zinc-700">
+                    {selectedInvoice.customerOrganization}
+                  </div>
+                )}
                 <div className="text-xs text-zinc-500">
                   {selectedInvoice.customerEmail}
                 </div>
+                {selectedInvoice.billingAddress && (
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    {selectedInvoice.billingAddress}
+                  </div>
+                )}
               </div>
               <InvoiceStatusBadge
                 status={selectedInvoice.status}
@@ -616,7 +876,14 @@ export default function InvoiceManagement() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3 bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-xs">
+            {/* Metadata */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-xs">
+              <div>
+                <div className="text-zinc-500">Subscription</div>
+                <div className="font-semibold text-zinc-900 font-mono mt-0.5">
+                  {selectedInvoice.subscriptionNumber}
+                </div>
+              </div>
               <div>
                 <div className="text-zinc-500">Invoice Date</div>
                 <div className="font-semibold text-zinc-900 mt-0.5">
@@ -631,12 +898,12 @@ export default function InvoiceManagement() {
               </div>
             </div>
 
-            {/* Line Items */}
+            {/* Product Lines & Automatic Taxes */}
             <div className="border border-zinc-200 rounded-xl overflow-hidden">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-zinc-50 border-b border-zinc-200 text-zinc-500 uppercase">
-                    <th className="py-2.5 px-3">Description</th>
+                    <th className="py-2.5 px-3">Product Line</th>
                     <th className="py-2.5 px-3 text-right">Qty</th>
                     <th className="py-2.5 px-3 text-right">Unit</th>
                     <th className="py-2.5 px-3 text-right">Amount</th>
@@ -645,8 +912,16 @@ export default function InvoiceManagement() {
                 <tbody className="divide-y divide-zinc-200">
                   {(selectedInvoice.lines || []).map((line) => (
                     <tr key={line.id}>
-                      <td className="py-3 px-3 font-medium text-zinc-900">
-                        {line.description}
+                      <td className="py-3 px-3">
+                        <div className="font-medium text-zinc-900">
+                          {line.description || line.name}
+                        </div>
+                        {line.variant &&
+                          !(line.description || '').includes(line.variant) && (
+                            <div className="text-[11px] text-zinc-500 mt-0.5">
+                              Variant: {line.variant}
+                            </div>
+                          )}
                       </td>
                       <td className="py-3 px-3 text-right tabular-nums text-zinc-600">
                         {line.quantity}
@@ -664,8 +939,42 @@ export default function InvoiceManagement() {
 
               <div className="bg-zinc-50 border-t border-zinc-200 p-3.5 space-y-1.5 text-xs">
                 <div className="flex justify-between text-zinc-600">
-                  <span>Total</span>
-                  <span className="tabular-nums font-semibold text-zinc-900">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums font-medium text-zinc-900">
+                    {formatMoney(selectedInvoice.subtotal)}
+                  </span>
+                </div>
+
+                {(selectedInvoice.taxLines || []).length > 0 ? (
+                  selectedInvoice.taxLines.map((tl, idx) => (
+                    <div
+                      key={tl.id || idx}
+                      className="flex justify-between text-zinc-600"
+                    >
+                      <span>
+                        Tax · {tl.name}
+                        {tl.rate !== undefined &&
+                        !String(tl.name).includes('%')
+                          ? ` (${tl.rate}%)`
+                          : ''}
+                      </span>
+                      <span className="tabular-nums font-medium text-zinc-900">
+                        {formatMoney(tl.amount)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex justify-between text-zinc-600">
+                    <span>Tax ({selectedInvoice.taxRate || '0%'})</span>
+                    <span className="tabular-nums font-medium text-zinc-900">
+                      {formatMoney(selectedInvoice.taxAmount || 0)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex justify-between border-t border-zinc-200 pt-1.5 font-semibold text-zinc-900">
+                  <span>Invoice Total</span>
+                  <span className="tabular-nums">
                     {formatMoney(selectedInvoice.total)}
                   </span>
                 </div>
