@@ -30,7 +30,7 @@ export function ResetPasswordPage() {
       if (!token) {
         if (isMounted) {
           setTokenValid(false);
-          setTokenError('No password reset token was provided in the link.');
+          setTokenError('No reset token was found in the link.');
           setIsValidating(false);
         }
         return;
@@ -111,84 +111,55 @@ export function ResetPasswordPage() {
 
   if (isValidating) {
     return (
-      <AuthLayout title="Verifying reset link" subtitle="Validating your token security...">
-        <div style={{ textAlign: 'center', padding: '30px 0', color: '#71717a' }}>
-          <div
-            style={{
-              display: 'inline-block',
-              width: 24,
-              height: 24,
-              border: '2px solid #e4e4e7',
-              borderTopColor: '#09090b',
-              borderRadius: '50%',
-              animation: 'spin 0.6s linear infinite',
-              marginBottom: 12
-            }}
-          />
-          <div>Checking link validity...</div>
+      <AuthLayout title="Verifying reset link" subtitle="Checking security credentials...">
+        <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--bl-text-muted)' }}>
+          Validating link...
         </div>
       </AuthLayout>
     );
   }
 
-  // Token is invalid or expired
   if (!tokenValid) {
     return (
-      <AuthLayout title="Invalid Reset Link" subtitle="Security token verification failed">
+      <AuthLayout title="Invalid reset link" subtitle="Link validation failed">
         <div className="bl-alert bl-alert-danger" role="alert">
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style={{ flexShrink: 0, marginTop: 2 }}>
-            <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 10.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4z" />
-          </svg>
-          <div>
-            <strong>Unable to proceed</strong>
-            <p style={{ marginTop: 4, fontSize: 13 }}>{tokenError}</p>
-          </div>
+          <div>{tokenError}</div>
         </div>
 
-        <p style={{ fontSize: 13, color: '#52525b', marginBottom: 20 }}>
-          For your protection, reset links are single-use and expire after 15 minutes. You can request a fresh link at any time.
+        <p style={{ fontSize: 13, color: 'var(--bl-text-secondary)', marginBottom: 20, lineHeight: 1.5 }}>
+          Password reset links are valid for 15 minutes and can only be used once. Please request a new link to continue.
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <Link to="/forgot-password" className="bl-btn bl-btn-primary bl-btn-lg" style={{ textDecoration: 'none' }}>
-            Request New Reset Link
+            Request new link
           </Link>
           <Link to="/signin" className="bl-btn bl-btn-secondary bl-btn-lg" style={{ textDecoration: 'none' }}>
-            Back to Sign In
+            Back to sign in
           </Link>
         </div>
       </AuthLayout>
     );
   }
 
-  // Reset was successful
   if (isSuccess) {
     return (
-      <AuthLayout title="Password Reset Complete" subtitle="Your credentials have been securely updated">
-        <div className="bl-alert bl-alert-success" role="alert" style={{ marginBottom: 24 }}>
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" style={{ flexShrink: 0, marginTop: 2 }}>
-            <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-3.97-3.03a.75.75 0 0 0-1.08.022L7.477 9.417 5.384 7.323a.75.75 0 0 0-1.06 1.06L6.97 11.03a.75.75 0 0 0 1.079-.02l3.992-4.99a.75.75 0 0 0-.01-1.05z" />
-          </svg>
-          <div>
-            <strong>Success</strong>
-            <p style={{ fontSize: 13, marginTop: 4 }}>
-              Your password has been changed. You can now sign in to Brightloop with your new password.
-            </p>
-          </div>
+      <AuthLayout title="Password updated" subtitle="Your password has been changed">
+        <div className="bl-alert bl-alert-success" role="alert" style={{ marginBottom: 20 }}>
+          <div>You can now sign in to your Brightloop account using your new password.</div>
         </div>
 
         <Link to="/signin" className="bl-btn bl-btn-primary bl-btn-lg" style={{ textDecoration: 'none' }}>
-          Sign In Now →
+          Sign in
         </Link>
       </AuthLayout>
     );
   }
 
-  // Valid token: show reset form
   return (
     <AuthLayout
-      title="Create new password"
-      subtitle={`Set a new secure password for ${userEmail || 'your account'}`}
+      title="Set new password"
+      subtitle={`Choose a new password for ${userEmail || 'your account'}`}
     >
       {formErrors.general && (
         <div className="bl-alert bl-alert-danger" role="alert">
@@ -201,8 +172,8 @@ export function ResetPasswordPage() {
           id="new-password"
           name="newPassword"
           type="password"
-          label="New Password"
-          placeholder="Enter new password"
+          label="New password"
+          placeholder="••••••••••••"
           value={formData.newPassword}
           onChange={handleChange}
           error={formErrors.newPassword}
@@ -217,13 +188,13 @@ export function ResetPasswordPage() {
           showConfirmCheck={formData.confirmPassword.length > 0}
         />
 
-        <div style={{ marginTop: 14 }}>
+        <div style={{ marginTop: 12 }}>
           <Input
             id="confirm-new-password"
             name="confirmPassword"
             type="password"
-            label="Confirm New Password"
-            placeholder="Repeat new password"
+            label="Confirm new password"
+            placeholder="••••••••••••"
             value={formData.confirmPassword}
             onChange={handleChange}
             error={formErrors.confirmPassword}
@@ -233,13 +204,13 @@ export function ResetPasswordPage() {
           />
         </div>
 
-        <div style={{ marginTop: 24 }}>
+        <div style={{ marginTop: 20 }}>
           <button
             type="submit"
             className="bl-btn bl-btn-primary bl-btn-lg"
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Updating Password...' : 'Save New Password & Sign In'}
+            {isSubmitting ? 'Updating password...' : 'Reset password'}
           </button>
         </div>
       </form>
