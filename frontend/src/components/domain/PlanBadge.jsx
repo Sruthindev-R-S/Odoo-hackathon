@@ -7,7 +7,7 @@ export default function PlanBadge({ availableFrom, availableTo }) {
   if (status === 'active') {
     return (
       <Badge variant="success" size="sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D4F]" />
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
         Available now
       </Badge>
     );
@@ -15,8 +15,8 @@ export default function PlanBadge({ availableFrom, availableTo }) {
 
   if (status === 'upcoming') {
     return (
-      <Badge variant="info" size="sm">
-        <span className="w-1.5 h-1.5 rounded-full bg-[#3B64C4]" />
+      <Badge variant="neutral" size="sm">
+        <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
         Scheduled
       </Badge>
     );
@@ -24,7 +24,7 @@ export default function PlanBadge({ availableFrom, availableTo }) {
 
   return (
     <Badge variant="neutral" size="sm">
-      <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
       Expired
     </Badge>
   );

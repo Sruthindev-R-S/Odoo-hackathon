@@ -9,9 +9,9 @@ export default function ProductTable({
   onDelete,
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
-      <table className="w-full text-left text-sm text-slate-600">
-        <thead className="bg-[#F5F7FA] text-xs uppercase font-semibold text-[#16233B] border-b border-slate-200 tracking-wider">
+    <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white shadow-2xs">
+      <table className="w-full text-left text-sm text-zinc-600">
+        <thead className="bg-zinc-50 text-xs uppercase font-semibold text-zinc-900 border-b border-zinc-200 tracking-wider">
           <tr>
             <th scope="col" className="px-5 py-3.5">Product</th>
             <th scope="col" className="px-4 py-3.5">Type</th>
@@ -23,7 +23,7 @@ export default function ProductTable({
             <th scope="col" className="px-4 py-3.5 text-right">Actions</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-zinc-100">
           {products.map((product) => {
             const { profit, marginPercent } = calculateMargin(
               product.salesPrice,
@@ -33,15 +33,15 @@ export default function ProductTable({
             return (
               <tr
                 key={product.id}
-                className="hover:bg-slate-50/80 transition-colors group"
+                className="hover:bg-zinc-50/80 transition-colors group"
               >
                 {/* Product Name & Notes */}
                 <td className="px-5 py-4">
-                  <div className="font-bold text-[#16233B]">
+                  <div className="font-semibold text-zinc-900">
                     {product.name}
                   </div>
                   {product.notes && (
-                    <div className="text-xs text-slate-400 mt-0.5 line-clamp-1 max-w-xs">
+                    <div className="text-xs text-zinc-400 mt-0.5 line-clamp-1 max-w-xs">
                       {product.notes}
                     </div>
                   )}
@@ -55,12 +55,12 @@ export default function ProductTable({
                 </td>
 
                 {/* Sales Price */}
-                <td className="px-4 py-4 text-right font-semibold text-[#16233B] whitespace-nowrap">
+                <td className="px-4 py-4 text-right font-semibold text-zinc-900 whitespace-nowrap">
                   <MoneyText amount={product.salesPrice} />
                 </td>
 
                 {/* Cost Price */}
-                <td className="px-4 py-4 text-right text-slate-500 whitespace-nowrap">
+                <td className="px-4 py-4 text-right text-zinc-500 whitespace-nowrap">
                   <MoneyText amount={product.costPrice} />
                 </td>
 
@@ -69,15 +69,15 @@ export default function ProductTable({
                   <span
                     className={`font-semibold tabular-nums text-xs px-2 py-0.5 rounded-full ${
                       marginPercent >= 25
-                        ? 'bg-[#EAF5EE] text-[#2E7D4F]'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : marginPercent > 0
-                        ? 'bg-[#FEF7EC] text-[#B7791F]'
-                        : 'bg-[#FDEEEE] text-[#C2362F]'
+                        ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                        : 'bg-red-50 text-red-700 border border-red-200'
                     }`}
                   >
                     {formatPercent(marginPercent)}
                   </span>
-                  <div className="text-[10px] text-slate-400 mt-0.5 tabular-nums">
+                  <div className="text-[10px] text-zinc-400 mt-0.5 tabular-nums">
                     +{formatMoney(profit)}
                   </div>
                 </td>
@@ -89,15 +89,15 @@ export default function ProductTable({
                       {product.variants.map((v) => (
                         <span
                           key={v.id}
-                          className="inline-flex items-center gap-1 text-[11px] font-medium bg-[#E6F5F6] text-[#0E7C86] border border-[#0E7C86]/20 px-2 py-0.5 rounded-md"
+                          className="inline-flex items-center gap-1 text-[11px] font-medium bg-zinc-100 text-zinc-900 border border-zinc-200 px-2 py-0.5 rounded-md"
                           title={`Attribute: ${v.attribute}, Value: ${v.value}, Extra: +₹${v.extraPrice} (Effective: ₹${(product.salesPrice + v.extraPrice).toLocaleString('en-IN')})`}
                         >
-                          <Tag className="w-2.5 h-2.5" />
+                          <Tag className="w-2.5 h-2.5 text-zinc-500" />
                           <span>
                             {v.attribute}: {v.value}
                           </span>
                           {v.extraPrice > 0 && (
-                            <span className="font-bold text-[#16233B]">
+                            <span className="font-semibold text-orange-700">
                               (+₹{v.extraPrice.toLocaleString('en-IN')})
                             </span>
                           )}
@@ -105,7 +105,7 @@ export default function ProductTable({
                       ))}
                     </div>
                   ) : (
-                    <span className="text-xs text-slate-400 italic">
+                    <span className="text-xs text-zinc-400 italic">
                       None (standard base)
                     </span>
                   )}
@@ -114,12 +114,12 @@ export default function ProductTable({
                 {/* Status */}
                 <td className="px-4 py-4 text-center whitespace-nowrap">
                   {product.isActive ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-[#2E7D4F]">
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       Active
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400">
+                    <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-400">
                       <XCircle className="w-3.5 h-3.5" />
                       Inactive
                     </span>
@@ -131,14 +131,14 @@ export default function ProductTable({
                   <div className="flex items-center justify-end gap-1">
                     <button
                       onClick={() => onEdit(product)}
-                      className="p-1.5 text-slate-500 hover:text-[#0E7C86] hover:bg-slate-100 rounded-md transition-colors"
+                      className="p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors"
                       title="Edit product"
                     >
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => onDelete(product)}
-                      className="p-1.5 text-slate-500 hover:text-[#C2362F] hover:bg-red-50 rounded-md transition-colors"
+                      className="p-1.5 text-zinc-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
                       title="Delete product"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -153,4 +153,3 @@ export default function ProductTable({
     </div>
   );
 }
-

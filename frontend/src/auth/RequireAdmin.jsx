@@ -15,15 +15,15 @@ export default function RequireAdmin({ children }) {
     };
 
     return (
-      <div className="min-h-screen bg-[#F5F7FA] flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white rounded-xl border border-slate-200 p-8 shadow-sm text-center">
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white rounded-xl border border-zinc-200 p-8 shadow-sm text-center">
           <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <Lock className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-bold text-[#16233B] mb-2">Admin Access Required</h2>
-          <p className="text-sm text-slate-600 mb-6">
+          <h2 className="text-xl font-bold text-zinc-900 mb-2">Admin Access Required</h2>
+          <p className="text-sm text-zinc-600 mb-6">
             You are currently signed in as{' '}
-            <span className="font-semibold text-slate-800">{user.email}</span> (
+            <span className="font-semibold text-zinc-900">{user.email}</span> (
             <span className="capitalize">{user.role}</span>).
             Only administrators are authorized to manage products, variants, and subscription plans.
           </p>

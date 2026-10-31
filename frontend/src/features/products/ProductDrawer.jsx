@@ -163,15 +163,15 @@ export default function ProductDrawer({
               <span className="text-slate-500 font-medium">Projected Margin:</span>{' '}
               <span
                 className={`font-bold tabular-nums ${
-                  profit >= 0 ? 'text-[#2E7D4F]' : 'text-[#C2362F]'
+                  profit >= 0 ? 'text-emerald-700' : 'text-red-600'
                 }`}
               >
                 {formatPercent(marginPercent)}
               </span>
             </div>
             <div>
-              <span className="text-slate-500 font-medium">Gross Profit / Unit:</span>{' '}
-              <span className="font-bold text-[#16233B] tabular-nums">
+              <span className="text-zinc-500 font-medium">Gross Profit / Unit:</span>{' '}
+              <span className="font-bold text-zinc-900 tabular-nums">
                 {formatMoney(profit)}
               </span>
             </div>

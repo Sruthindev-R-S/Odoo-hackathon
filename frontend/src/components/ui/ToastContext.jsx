@@ -31,18 +31,18 @@ export function ToastProvider({ children }) {
             key={toast.id}
             className={`pointer-events-auto flex items-start gap-3 p-3.5 rounded-xl shadow-lg border text-sm animate-in slide-in-from-bottom-2 duration-150 ${
               toast.type === 'success'
-                ? 'bg-white border-[#2E7D4F]/30 text-[#16233B]'
+                ? 'bg-white border-emerald-200 text-zinc-900'
                 : toast.type === 'error'
-                ? 'bg-white border-[#C2362F]/30 text-[#16233B]'
-                : 'bg-white border-slate-200 text-[#16233B]'
+                ? 'bg-white border-rose-200 text-zinc-900'
+                : 'bg-white border-zinc-200 text-zinc-900'
             }`}
           >
             {toast.type === 'success' ? (
-              <CheckCircle2 className="w-5 h-5 text-[#2E7D4F] shrink-0 mt-0.5" />
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
             ) : toast.type === 'error' ? (
-              <AlertCircle className="w-5 h-5 text-[#C2362F] shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
             ) : (
-              <Info className="w-5 h-5 text-[#0E7C86] shrink-0 mt-0.5" />
+              <Info className="w-5 h-5 text-zinc-900 shrink-0 mt-0.5" />
             )}
 
             <div className="flex-1 text-xs sm:text-sm font-medium leading-snug">
@@ -51,7 +51,7 @@ export function ToastProvider({ children }) {
 
             <button
               onClick={() => removeToast(toast.id)}
-              className="text-slate-400 hover:text-slate-600 p-0.5"
+              className="text-zinc-400 hover:text-zinc-600 p-0.5"
             >
               <X className="w-4 h-4" />
             </button>

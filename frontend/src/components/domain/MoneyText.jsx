@@ -11,7 +11,7 @@ export default function MoneyText({
   return (
     <span
       className={`tabular-nums font-medium ${
-        isNegative ? 'text-[#C2362F]' : 'text-[#16233B]'
+        isNegative ? 'text-red-600' : 'text-zinc-900'
       } ${className}`}
     >
       {isNegative ? `-${formatted}` : formatted}

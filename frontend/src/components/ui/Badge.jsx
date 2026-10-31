@@ -11,13 +11,13 @@ export default function Badge({
   };
 
   const variantStyles = {
-    neutral: 'bg-slate-100 text-slate-700 border border-slate-200',
-    loop: 'bg-[#E6F5F6] text-[#0E7C86] border border-[#0E7C86]/20 font-semibold',
-    success: 'bg-[#EAF5EE] text-[#2E7D4F] border border-[#2E7D4F]/20 font-medium',
-    warning: 'bg-[#FEF7EC] text-[#B7791F] border border-[#B7791F]/20 font-medium',
-    danger: 'bg-[#FDEEEE] text-[#C2362F] border border-[#C2362F]/20 font-medium',
-    info: 'bg-[#EEF3FD] text-[#3B64C4] border border-[#3B64C4]/20 font-medium',
-    outline: 'bg-transparent text-slate-600 border border-slate-300',
+    neutral: 'bg-zinc-100 text-zinc-700 border border-zinc-200',
+    loop: 'bg-zinc-900 text-white border border-zinc-900 font-medium',
+    success: 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium',
+    warning: 'bg-amber-50 text-amber-800 border border-amber-200 font-medium',
+    danger: 'bg-red-50 text-red-700 border border-red-200 font-medium',
+    info: 'bg-zinc-100 text-zinc-800 border border-zinc-200 font-medium',
+    outline: 'bg-transparent text-zinc-700 border border-zinc-300',
   };
 
   return (

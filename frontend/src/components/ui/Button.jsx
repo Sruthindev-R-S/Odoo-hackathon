@@ -26,17 +26,17 @@ const Button = forwardRef(function Button(
 
   const variantStyles = {
     primary:
-      'bg-[#0E7C86] hover:bg-[#0B656D] text-white focus:ring-[#0E7C86]/40 shadow-sm active:translate-y-[0.5px]',
+      'bg-zinc-900 hover:bg-zinc-800 text-white focus:ring-zinc-900/30 shadow-xs active:translate-y-[0.5px]',
     secondary:
-      'bg-[#F5F7FA] hover:bg-[#EAEFF5] text-[#16233B] border border-[#E2E8F0] focus:ring-slate-300',
+      'bg-white hover:bg-zinc-100 text-zinc-900 border border-zinc-200 focus:ring-zinc-300 shadow-xs',
     outline:
-      'bg-white hover:bg-slate-50 text-[#16233B] border border-slate-300 focus:ring-slate-300 shadow-xs',
+      'bg-white hover:bg-zinc-50 text-zinc-900 border border-zinc-300 focus:ring-zinc-300 shadow-xs',
     ghost:
-      'bg-transparent hover:bg-slate-100 text-[#16233B] focus:ring-slate-300',
+      'bg-transparent hover:bg-zinc-100 text-zinc-800 focus:ring-zinc-300',
     danger:
-      'bg-[#C2362F] hover:bg-[#A82B25] text-white focus:ring-[#C2362F]/40 shadow-sm',
+      'bg-red-600 hover:bg-red-700 text-white focus:ring-red-500/30 shadow-xs',
     dangerOutline:
-      'bg-white hover:bg-red-50 text-[#C2362F] border border-red-200 focus:ring-red-200',
+      'bg-white hover:bg-red-50 text-red-600 border border-red-200 focus:ring-red-200',
   };
 
   return (

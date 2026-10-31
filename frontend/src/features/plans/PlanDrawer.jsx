@@ -154,7 +154,7 @@ export default function PlanDrawer({
             helperText="The catalog product this recurring plan licenses or delivers."
           />
           {products.length === 0 && (
-            <p className="text-xs text-[#B7791F] mt-1 font-medium">
+            <p className="text-xs text-amber-800 mt-1 font-medium">
               Notice: You must have at least one product created before saving a plan.
             </p>
           )}
@@ -205,9 +205,9 @@ export default function PlanDrawer({
         />
 
         {/* Availability Dates */}
-        <div className="space-y-3 pt-3 border-t border-slate-200">
-          <label className="text-xs font-semibold text-[#16233B] tracking-tight flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-[#0E7C86]" />
+        <div className="space-y-3 pt-3 border-t border-zinc-200">
+          <label className="text-xs font-semibold text-zinc-900 tracking-tight flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-zinc-900" />
             Plan Availability Window
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -235,18 +235,18 @@ export default function PlanDrawer({
         </div>
 
         {/* 4 Behavior Switches as specified in Section 7.2 */}
-        <div className="space-y-2 pt-4 border-t border-slate-200">
+        <div className="space-y-2 pt-4 border-t border-zinc-200">
           <div className="mb-2">
-            <label className="text-xs font-semibold text-[#16233B] tracking-tight flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-[#0E7C86]" />
+            <label className="text-xs font-semibold text-zinc-900 tracking-tight flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-zinc-900" />
               Plan Lifecycle Behaviors
             </label>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-zinc-500 mt-0.5">
               Specify subscription actions permitted under this plan.
             </p>
           </div>
 
-          <div className="divide-y divide-slate-100 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
+          <div className="divide-y divide-zinc-200 bg-zinc-50 p-3.5 rounded-xl border border-zinc-200">
             {/* 1. Closes automatically when it ends */}
             <Switch
               label="Closes automatically when it ends"

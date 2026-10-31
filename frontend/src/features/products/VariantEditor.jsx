@@ -46,24 +46,24 @@ export default function VariantEditor({
   };
 
   return (
-    <div className="space-y-4 pt-3 border-t border-slate-200">
+    <div className="space-y-4 pt-3 border-t border-zinc-200">
       <div>
         <div className="flex items-center justify-between">
-          <label className="text-xs font-semibold text-[#16233B] tracking-tight flex items-center gap-1.5">
-            <Tag className="w-3.5 h-3.5 text-[#0E7C86]" />
+          <label className="text-xs font-semibold text-zinc-900 tracking-tight flex items-center gap-1.5">
+            <Tag className="w-3.5 h-3.5 text-zinc-900" />
             Configurable Variants & Add-ons
           </label>
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-zinc-500">
             {variants.length} variant{variants.length === 1 ? '' : 's'} configured
           </span>
         </div>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Define attributes (e.g. Brand, Edition) with extra pricing that adjusts the base price.
+        <p className="text-xs text-zinc-500 mt-0.5">
+          Define attributes (e.g. Brand, Edition) with extra pricing that adjusts the base price (e.g. Odoo brand adds 560).
         </p>
       </div>
 
       {/* New Variant Input Form */}
-      <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-3">
+      <div className="bg-zinc-50 rounded-xl p-3.5 border border-zinc-200 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           <div>
             <Input
@@ -101,13 +101,13 @@ export default function VariantEditor({
 
         {/* Live preview of new variant effective price */}
         {newVariant.attribute && newVariant.value && (
-          <div className="text-xs text-[#0E7C86] bg-[#E6F5F6] px-3 py-2 rounded-lg flex items-center justify-between font-medium">
+          <div className="text-xs text-zinc-900 bg-white border border-zinc-200 px-3 py-2 rounded-lg flex items-center justify-between font-medium">
             <span>
-              Preview: <strong className="text-[#16233B]">{newVariant.attribute}: {newVariant.value}</strong>
+              Preview: <strong className="text-zinc-900">{newVariant.attribute}: {newVariant.value}</strong>
             </span>
             <span className="tabular-nums">
               Base {formatMoney(basePriceNum)} + Extra {formatMoney(newVariant.extraPrice || 0)} ={' '}
-              <strong className="text-[#16233B]">
+              <strong className="text-zinc-900 font-bold">
                 {formatMoney(basePriceNum + (Number(newVariant.extraPrice) || 0))}
               </strong>
             </span>
@@ -115,7 +115,7 @@ export default function VariantEditor({
         )}
 
         {variantError && (
-          <p className="text-xs text-[#C2362F] font-medium">{variantError}</p>
+          <p className="text-xs text-red-600 font-medium">{variantError}</p>
         )}
 
         <div className="flex justify-end">
@@ -141,21 +141,21 @@ export default function VariantEditor({
             return (
               <div
                 key={v.id || index}
-                className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 shadow-2xs hover:border-slate-300 transition-standard"
+                className="flex items-center justify-between p-3 bg-white rounded-lg border border-zinc-200 shadow-2xs hover:border-zinc-300 transition-colors"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                     {v.attribute}:
                   </span>
-                  <span className="text-sm font-bold text-[#16233B]">
+                  <span className="text-sm font-semibold text-zinc-900">
                     {v.value}
                   </span>
                   {extra > 0 ? (
-                    <span className="text-xs font-medium text-[#0E7C86] bg-[#E6F5F6] px-2 py-0.5 rounded-full tabular-nums">
+                    <span className="text-xs font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full tabular-nums">
                       +₹{extra.toLocaleString('en-IN')}
                     </span>
                   ) : (
-                    <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                    <span className="text-xs text-zinc-400 bg-zinc-100 px-2 py-0.5 rounded-full">
                       Included
                     </span>
                   )}
@@ -164,8 +164,8 @@ export default function VariantEditor({
                 <div className="flex items-center gap-3">
                   {/* Live Effective Price display required by 7.1 */}
                   <div className="text-right hidden sm:block">
-                    <div className="text-[11px] text-slate-500">Effective Price</div>
-                    <div className="text-xs font-bold text-[#16233B] tabular-nums">
+                    <div className="text-[11px] text-zinc-500">Effective Price</div>
+                    <div className="text-xs font-bold text-zinc-900 tabular-nums">
                       {formatMoney(effective)}
                     </div>
                   </div>
@@ -173,7 +173,7 @@ export default function VariantEditor({
                   <button
                     type="button"
                     onClick={() => handleRemoveVariant(index)}
-                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
                     title="Remove variant"
                   >
                     <Trash2 className="w-4 h-4" />
